@@ -1,0 +1,32 @@
+.env
+.env.local
+design
+node_modules
+dist
+coverage
+*.log
+firebase-debug.log*
+firestore-debug.log*
+ui-debug.log*
+.firebase/
+.idea/workspace.xml
+
+# Android build output (the android/ project itself is committed)
+android/app/build
+android/build
+android/.gradle
+android/local.properties
+android/app/release
+*.keystore
+*.jks
+.playwright-mcp
+
+# Local Firebase emulator data (accounts/potlucks you create while testing)
+.emulator-data
+
+# Per-person IDE state (selected device, device lists, caches) — would cause merge conflicts
+.idea/caches/
+.idea/deviceManager.xml
+android/.idea/deploymentTargetSelector.xml
+android/.idea/deviceManager.xml
+android/.idea/caches/

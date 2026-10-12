@@ -1,0 +1,296 @@
+rules_version = '2';
+
+// Potluck Showdown security rules.
+//
+// Design goals enforced here (not just in the UI):
+//  * Profiles can be fetched by id (to render an avatar) but never listed/searched.
+//  * Dishes + recipes are only readable by people who joined that potluck.
+//  * Ratings are anonymous: only the voter can read their own rating doc, and a
+//    vote is only accepted if the dish aggregate is incremented by exactly the
+//    submitted scores in the same atomic batch.
+//  * Win frames (gold/silver/bronze/host) can only be equipped when the
+//    referenced, closed potluck actually backs the claim.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- helpers ----------
+    function signedIn() { return request.auth != null; }
+    function me() { return request.auth.uid; }
+    function isGuest() { return request.auth.token.firebase.sign_in_provider == 'anonymous'; }
+    function changed() { return request.resource.data.diff(resource.data).affectedKeys(); }
+    function potluckPath(pid) { return /databases/$(database)/documents/potlucks/$(pid); }
+    function potluckData(pid) { return get(potluckPath(pid)).data; }
+    function isMember(p) { return signedIn() && me() in p.memberIds; }
+    function optTime(d, key) { return d.get(key, null); }
+
+    // Voting is live when the host opened it manually, or the scheduled
+    // opening time has passed, and the optional closing time hasn't.
+    function votingLive(p) {
+      return p.status != 'closed'
+        && (p.status == 'voting'
+            || (optTime(p, 'votingOpensAt') != null && request.time >= p.votingOpensAt))
+        && (optTime(p, 'votingClosesAt') == null || request.time < p.votingClosesAt);
+    }
+
+    // Dishes can be added/edited only before voting starts.
+    function dishesEditable(p) {
+      return p.status == 'open'
+        && (optTime(p, 'votingOpensAt') == null || request.time < p.votingOpensAt);
+    }
+
+    function isShortString(v, max) { return v is string && v.size() <= max; }
+    function optShortString(d, key, max) {
+      return !(key in d) || d[key] == null || isShortString(d[key], max);
+    }
+
+    // ---------- private user data ----------
+    match /users/{userId} {
+      allow read, write: if signedIn() && me() == userId;
+    }
+
+    // ---------- public profile (name, avatar, frame) ----------
+    match /publicProfiles/{userId} {
+      // get-by-id only: avatars render everywhere, but nobody can browse or search people.
+      allow get: if signedIn();
+      allow list: if false;
+      allow create, update: if signedIn() && me() == userId && validProfile(request.resource.data);
+      allow delete: if signedIn() && me() == userId;
+    }
+
+    function validProfile(d) {
+      return d.keys().hasOnly(['displayName', 'photoURL', 'frame', 'isGuest', 'updatedAt'])
+        && d.displayName is string && d.displayName.size() >= 1 && d.displayName.size() <= 40
+        && optShortString(d, 'photoURL', 120000)
+        && (d.get('frame', null) == null || validFrame(d.frame));
+    }
+
+    function validFrame(f) {
+      return f.keys().hasOnly(['tier', 'potluckId'])
+        && f.tier in ['gold', 'silver', 'bronze', 'host']
+        && f.potluckId is string
+        && earnedFrame(f.tier, potluckData(f.potluckId));
+    }
+
+    function earnedFrame(tier, p) {
+      return p.status == 'closed' && (
+        (tier == 'gold' && p.podium.size() > 0 && p.podium[0] == me())
+        || (tier == 'silver' && p.podium.size() > 1 && p.podium[1] == me())
+        || (tier == 'bronze' && p.podium.size() > 2 && p.podium[2] == me())
+        || (tier == 'host' && p.hostId == me()));
+    }
+
+    // ---------- invite codes (unique, immutable) ----------
+    match /inviteCodes/{code} {
+      allow get: if signedIn();
+      allow list: if false;
+      allow create: if signedIn() && !isGuest()
+        && code.matches('^[A-Z0-9-]{4,20}$')
+        && request.resource.data.keys().hasOnly(['potluckId', 'hostId', 'createdAt'])
+        && request.resource.data.hostId == me()
+        && getAfter(potluckPath(request.resource.data.potluckId)).data.hostId == me()
+        && getAfter(potluckPath(request.resource.data.potluckId)).data.inviteCode == code;
+      allow delete: if signedIn() && resource.data.hostId == me();
+    }
+
+    // ---------- potlucks ----------
+    match /potlucks/{pid} {
+      // Anyone signed in may fetch a potluck by id (ids are random and only
+      // shared through invite codes) so invitees can preview before joining.
+      allow get: if signedIn();
+      // Listing ("my potlucks") is restricted to members.
+      allow list: if signedIn() && me() in resource.data.memberIds;
+
+      allow create: if signedIn() && !isGuest()
+        && validPotluck(request.resource.data)
+        && request.resource.data.hostId == me()
+        && request.resource.data.memberIds == [me()]
+        && request.resource.data.status == 'open'
+        && request.resource.data.podium == []
+        && existsAfter(/databases/$(database)/documents/inviteCodes/$(request.resource.data.inviteCode))
+        && getAfter(/databases/$(database)/documents/inviteCodes/$(request.resource.data.inviteCode)).data.potluckId == pid;
+
+      allow update: if signedIn() && (hostUpdate() || joinSelf() || leaveSelf());
+
+      // Hosts may cancel an event, but finished potlucks are kept for the recipe bank.
+      allow delete: if signedIn() && resource.data.hostId == me() && resource.data.status != 'closed';
+
+      function hostUpdate() {
+        let before = resource.data;
+        let after = request.resource.data;
+        return before.hostId == me()
+          && before.status != 'closed'              // results are final
+          && after.hostId == before.hostId
+          && after.inviteCode == before.inviteCode
+          && validPotluck(after)
+          // hosts can remove guests but never add people
+          && after.memberIds.toSet().difference(before.memberIds.toSet()).size() == 0
+          // scoring can't change once voting may have started
+          && (!changed().hasAny(['scoring', 'categoryIds']) || dishesEditable(before))
+          // podium is only written when the results are published
+          && (!changed().hasAny(['podium', 'results']) || after.status == 'closed');
+      }
+
+      function joinSelf() {
+        let before = resource.data.memberIds;
+        let after = request.resource.data.memberIds;
+        return changed().hasOnly(['memberIds'])
+          && resource.data.status != 'closed'
+          && !(me() in before)
+          && after.size() == before.size() + 1
+          && after.hasAll(before) && me() in after
+          && (resource.data.get('maxGuests', 0) == 0 || after.size() <= resource.data.maxGuests);
+      }
+
+      function leaveSelf() {
+        let before = resource.data.memberIds;
+        let after = request.resource.data.memberIds;
+        return changed().hasOnly(['memberIds'])
+          && resource.data.status == 'open'
+          && resource.data.hostId != me()
+          && me() in before && !(me() in after)
+          && after.size() == before.size() - 1
+          && before.hasAll(after);
+      }
+
+      // ----- dishes (one per member; doc id == author uid) -----
+      match /dishes/{dishId} {
+        allow read: if isMember(potluckData(pid));
+
+        allow create: if dishId == me()
+          && isMember(potluckData(pid))
+          && dishesEditable(potluckData(pid))
+          && validDish(request.resource.data)
+          && request.resource.data.authorId == me()
+          && request.resource.data.potluckId == pid
+          && request.resource.data.scoreSums == {}
+          && request.resource.data.ratingCount == 0
+          && request.resource.data.likedBy == [];
+
+        allow update: if isMember(potluckData(pid))
+          && (authorEdit() || validVote() || likeToggle());
+
+        allow delete: if signedIn() && (
+          (resource.data.authorId == me() && dishesEditable(potluckData(pid)))
+          || (potluckData(pid).hostId == me() && potluckData(pid).status != 'closed'));
+
+        function authorEdit() {
+          return resource.data.authorId == me()
+            && dishesEditable(potluckData(pid))
+            && !changed().hasAny(['authorId', 'potluckId', 'scoreSums', 'ratingCount', 'likedBy', 'createdAt'])
+            && validDish(request.resource.data);
+        }
+
+        function ratingPath() {
+          return /databases/$(database)/documents/potlucks/$(pid)/ratings/$(dishId + '_' + me());
+        }
+
+        // A vote must be written together with the voter's rating doc, and the
+        // aggregate must grow by exactly the submitted scores.
+        function validVote() {
+          return votingLive(potluckData(pid))
+            && resource.data.authorId != me()
+            && changed().hasOnly(['scoreSums', 'ratingCount'])
+            && request.resource.data.ratingCount == resource.data.ratingCount + 1
+            && !exists(ratingPath())
+            && existsAfter(ratingPath())
+            && sumsMatch(resource.data.scoreSums, request.resource.data.scoreSums,
+                         getAfter(ratingPath()).data.scores);
+        }
+
+        function sumsMatch(b, a, s) {
+          return a.keys().hasOnly(['c0', 'c1', 'c2', 'c3'])
+            && a.get('c0', 0) == b.get('c0', 0) + s.get('c0', 0)
+            && a.get('c1', 0) == b.get('c1', 0) + s.get('c1', 0)
+            && a.get('c2', 0) == b.get('c2', 0) + s.get('c2', 0)
+            && a.get('c3', 0) == b.get('c3', 0) + s.get('c3', 0);
+        }
+
+        function likeToggle() {
+          let before = resource.data.likedBy;
+          let after = request.resource.data.likedBy;
+          return changed().hasOnly(['likedBy'])
+            && ((!(me() in before) && me() in after && after.size() == before.size() + 1 && after.hasAll(before))
+              || (me() in before && !(me() in after) && after.size() == before.size() - 1 && before.hasAll(after)));
+        }
+      }
+
+      // ----- anonymous ratings (doc id == `${dishId}_${voterUid}`) -----
+      match /ratings/{ratingId} {
+        // Only the voter can see their own rating. Not even the host can.
+        allow read: if signedIn() && resource.data.uid == me();
+
+        allow create: if signedIn()
+          && request.resource.data.keys().hasOnly(['uid', 'dishId', 'scores', 'createdAt'])
+          && request.resource.data.uid == me()
+          && ratingId == request.resource.data.dishId + '_' + me()
+          && isMember(potluckData(pid))
+          && votingLive(potluckData(pid))
+          && validScores(request.resource.data.scores, potluckData(pid).categoryIds)
+          && getAfter(/databases/$(database)/documents/potlucks/$(pid)/dishes/$(request.resource.data.dishId)).data.ratingCount
+             == get(/databases/$(database)/documents/potlucks/$(pid)/dishes/$(request.resource.data.dishId)).data.ratingCount + 1;
+
+        allow update, delete: if false;   // votes are final
+      }
+
+      function validScores(s, ids) {
+        return s.keys().hasOnly(ids) && s.keys().hasAll(ids)
+          && validScore(s.get('c0', 1)) && validScore(s.get('c1', 1))
+          && validScore(s.get('c2', 1)) && validScore(s.get('c3', 1));
+      }
+
+      function validScore(v) { return v is int && v >= 1 && v <= 5; }
+
+      // ----- compressed photos (members only) -----
+      match /images/{imageId} {
+        allow read: if isMember(potluckData(pid));
+        allow create: if isMember(potluckData(pid))
+          && request.resource.data.keys().hasOnly(['ownerId', 'data', 'createdAt'])
+          && request.resource.data.ownerId == me()
+          && request.resource.data.data is string
+          && request.resource.data.data.size() < 900000
+          && request.resource.data.data.matches('^data:image/(jpeg|png|webp);base64,.*');
+        allow delete: if signedIn() && resource.data.ownerId == me();
+      }
+    }
+
+    function validPotluck(d) {
+      return d.keys().hasOnly(['title', 'theme', 'format', 'formatDetail', 'description', 'location',
+                               'startsAt', 'votingOpensAt', 'votingClosesAt', 'maxGuests', 'inviteCode',
+                               'hostId', 'memberIds', 'status', 'scoring', 'categoryIds', 'dishCategories',
+                               'coverImage', 'podium', 'results', 'createdAt', 'updatedAt'])
+        && d.title is string && d.title.size() >= 1 && d.title.size() <= 80
+        && optShortString(d, 'theme', 120)
+        && optShortString(d, 'formatDetail', 300)
+        && optShortString(d, 'description', 1000)
+        && optShortString(d, 'location', 160)
+        && optShortString(d, 'coverImage', 300)
+        && d.format in ['classic', 'mystery', 'regional', 'courses']
+        && d.startsAt is timestamp
+        && d.status in ['open', 'voting', 'closed']
+        && d.memberIds is list && d.hostId in d.memberIds
+        && d.scoring is list && d.scoring.size() >= 1 && d.scoring.size() <= 4
+        && d.categoryIds is list && d.categoryIds.size() == d.scoring.size()
+        && d.categoryIds.hasOnly(['c0', 'c1', 'c2', 'c3'])
+        && d.dishCategories is list && d.dishCategories.size() >= 1 && d.dishCategories.size() <= 12
+        && d.podium is list && d.podium.size() <= 3
+        && d.get('maxGuests', 0) is int && d.get('maxGuests', 0) >= 0
+        && (d.get('maxGuests', 0) == 0 || d.memberIds.size() <= d.maxGuests);
+    }
+
+    function validDish(d) {
+      return d.keys().hasOnly(['authorId', 'potluckId', 'name', 'categoryId', 'serves', 'ingredients',
+                               'steps', 'allergens', 'dietary', 'prepMinutes', 'calories', 'photo',
+                               'recipePhoto', 'usedRequired', 'scoreSums', 'ratingCount', 'likedBy',
+                               'createdAt', 'updatedAt'])
+        && d.name is string && d.name.size() >= 1 && d.name.size() <= 80
+        && d.categoryId is string
+        && optShortString(d, 'serves', 40)
+        && d.ingredients is list && d.ingredients.size() >= 1 && d.ingredients.size() <= 60
+        && d.steps is string && d.steps.size() <= 8000
+        && d.allergens is list && d.allergens.size() <= 20
+        && d.dietary is list && d.dietary.size() <= 20
+        && optShortString(d, 'photo', 300)
+        && optShortString(d, 'recipePhoto', 300);
+    }
+  }
+}

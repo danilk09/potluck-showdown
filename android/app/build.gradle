@@ -1,0 +1,98 @@
+apply plugin: 'com.android.application'
+
+android {
+    namespace = "com.potluckshowdown.app"
+    compileSdk = rootProject.ext.compileSdkVersion
+    defaultConfig {
+        applicationId "com.potluckshowdown.app"
+        minSdkVersion rootProject.ext.minSdkVersion
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        versionCode 1
+        versionName "1.0"
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        aaptOptions {
+             // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
+             // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
+            ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+    }
+}
+
+repositories {
+    flatDir{
+        dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
+    }
+}
+
+dependencies {
+    implementation fileTree(include: ['*.jar'], dir: 'libs')
+    implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
+    implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    implementation project(':capacitor-android')
+    testImplementation "junit:junit:$junitVersion"
+    androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
+    androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
+    implementation project(':capacitor-cordova-android-plugins')
+}
+
+apply from: 'capacitor.build.gradle'
+
+try {
+    def servicesJSON = file('google-services.json')
+    if (servicesJSON.text) {
+        apply plugin: 'com.google.gms.google-services'
+    }
+} catch(Exception e) {
+    logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+}
+
+// ---------------------------------------------------------------------------
+// Potluck Showdown: keep the APK in sync with the React app.
+// Every build (including pressing Run in Android Studio) rebuilds the web app
+// and copies it into the APK, so you never test stale code.
+// Debug builds are allowed to reach the local Firebase emulators (10.0.2.2);
+// release builds are not. Skip this step with: ./gradlew assembleDebug -PskipWebBuild
+// ---------------------------------------------------------------------------
+def repoRoot = rootProject.projectDir.parentFile
+def isWindows = System.getProperty('os.name').toLowerCase().contains('windows')
+def npm = isWindows ? ['cmd', '/c', 'npm'] : ['npm']
+// Android Studio opened from the macOS Dock/Linux launcher doesn't inherit the terminal's PATH,
+// so add the usual Node.js install locations (Homebrew, nvm, Volta, system).
+def home = System.getProperty('user.home')
+def nodeDirs = ['/opt/homebrew/bin', '/usr/local/bin', "${home}/.volta/bin"]
+def nvmDir = new File("${home}/.nvm/versions/node")
+if (nvmDir.isDirectory()) nodeDirs += nvmDir.listFiles().findAll { it.isDirectory() }.sort { it.name }.reverse().collect { "${it}/bin" }
+def buildPath = isWindows ? System.getenv('PATH') : ((nodeDirs + [System.getenv('PATH')]).join(File.pathSeparator))
+
+['Debug', 'Release'].each { variant ->
+    def webTask = tasks.register("buildWebApp${variant}", Exec) {
+        group = 'potluck'
+        description = "Builds the React app and copies it into the ${variant.toLowerCase()} APK"
+        workingDir repoRoot
+        commandLine(*npm, 'run', 'android:web')
+        environment 'CAP_EMULATORS', variant == 'Debug' ? '1' : '0'
+        environment 'PATH', buildPath
+        // Only rebuild when the web code changed (keeps repeated Runs fast).
+        inputs.property('emulators', variant == 'Debug')
+        inputs.dir(new File(repoRoot, 'src'))
+        inputs.dir(new File(repoRoot, 'public'))
+        inputs.files(new File(repoRoot, 'index.html'), new File(repoRoot, 'package.json'), new File(repoRoot, 'capacitor.config.ts'))
+        inputs.files(new File(repoRoot, '.env'), new File(repoRoot, '.env.local'))  // may not exist; that's fine
+        outputs.dir(file('src/main/assets/public'))
+        outputs.file(file('src/main/assets/capacitor.config.json'))
+        onlyIf { !project.hasProperty('skipWebBuild') }
+        doFirst {
+            if (!new File(repoRoot, 'node_modules').exists()) {
+                throw new GradleException("Run `npm install` in ${repoRoot} first (the Android build packages the React app).")
+            }
+        }
+    }
+    tasks.matching { it.name == "pre${variant}Build" }.configureEach { dependsOn webTask }
+}

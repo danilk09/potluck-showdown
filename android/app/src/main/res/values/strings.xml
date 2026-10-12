@@ -1,0 +1,9 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Potluck Showdown</string>
+    <string name="title_activity_main">Potluck Showdown</string>
+    <string name="package_name">com.potluckshowdown.app</string>
+    <string name="custom_url_scheme">com.potluckshowdown.app</string>
+    <!-- Firebase Hosting domain that serves the web version + invite links. -->
+    <string name="app_link_host">potluck-showdown.web.app</string>
+</resources>

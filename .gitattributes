@@ -1,0 +1,8 @@
+# Consistent line endings so the project works for teammates on Windows, macOS, and Linux.
+* text=auto
+*.sh text eol=lf
+android/gradlew text eol=lf
+*.bat text eol=crlf
+*.png binary
+*.jpg binary
+*.jar binary

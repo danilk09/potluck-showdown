@@ -1,0 +1,59 @@
+{
+  "name": "potluck-showdown",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "lint": "oxlint src tests -D correctness --react-plugin",
+    "test": "vitest run tests/unit",
+    "test:rules": "node scripts/firebase.mjs emulators:exec --only firestore --project demo-potluck \"vitest run tests/rules\"",
+    "emulators": "node scripts/emulators.mjs",
+    "android:sync": "cap sync android",
+    "android:open": "cap open android",
+    "android:run": "cap run android",
+    "android:apk": "cd android && gradlew assembleDebug",
+    "icons": "node scripts/make-icons.mjs && capacitor-assets generate --android --iconBackgroundColor \"#F2553A\" --splashBackgroundColor \"#FFF7F2\" --splashBackgroundColorDark \"#221B17\"",
+    "deploy:web": "vite build && node scripts/firebase.mjs deploy --only hosting",
+    "deploy:rules": "node scripts/firebase.mjs deploy --only firestore",
+    "android:web": "vite build && cap copy android",
+    "seed": "node scripts/seed.mjs",
+    "postinstall": "vite build && cap sync android"
+  },
+  "dependencies": {
+    "@capacitor/app": "^8.1.2",
+    "@capacitor/core": "^8.5.3",
+    "@capacitor/haptics": "^8.0.2",
+    "@capacitor/share": "^8.0.3",
+    "@capacitor/splash-screen": "^8.0.2",
+    "@fontsource-variable/inter": "^5.3.0",
+    "bootstrap": "^5.3.8",
+    "bootstrap-icons": "^1.13.2",
+    "firebase": "^13.0.0",
+    "qrcode.react": "^4.2.0",
+    "react": "^19.3.0",
+    "react-bootstrap": "^2.10.10",
+    "react-dom": "^19.3.0",
+    "react-router": "^8.4.0"
+  },
+  "devDependencies": {
+    "@capacitor/android": "^8.5.3",
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^8.5.3",
+    "@firebase/rules-unit-testing": "^6.0.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "cross-env": "^10.1.0",
+    "firebase-tools": "^15.33.0",
+    "oxlint": "^1.87.0",
+    "sass-embedded": "^1.105.1",
+    "sharp": "^0.35.5",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4",
+    "vitest": "^4.1.11"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

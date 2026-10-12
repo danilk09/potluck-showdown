@@ -1,0 +1,12 @@
+// Capacitor's Android libraries live in ../node_modules, and `npm install` generates the
+// capacitor-cordova-android-plugins project. Fail with a clear message instead of a cryptic one.
+if (!new File(rootDir.parentFile, 'node_modules/@capacitor/android').exists()
+        || !new File(rootDir, 'capacitor-cordova-android-plugins/cordova.variables.gradle').exists()) {
+    throw new GradleException("Potluck Showdown setup: run `npm install` in the project folder (${rootDir.parentFile}), then sync Gradle again.")
+}
+
+include ':app'
+include ':capacitor-cordova-android-plugins'
+project(':capacitor-cordova-android-plugins').projectDir = new File('./capacitor-cordova-android-plugins/')
+
+apply from: 'capacitor.settings.gradle'
