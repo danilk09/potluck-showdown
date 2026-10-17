@@ -1,0 +1,49 @@
+{
+  "expo": {
+    "name": "Potluck Showdown",
+    "slug": "potluck-showdown",
+    "version": "1.0.0",
+    "scheme": "potluckshowdown",
+    "orientation": "portrait",
+    "icon": "./assets/icon-only.png",
+    "userInterfaceStyle": "light",
+    "backgroundColor": "#FFF7F2",
+    "android": {
+      "package": "com.potluckshowdown.app",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icon-foreground.png",
+        "backgroundColor": "#F2553A"
+      },
+      "softwareKeyboardLayoutMode": "resize"
+    },
+    "ios": {
+      "bundleIdentifier": "com.potluckshowdown.app",
+      "supportsTablet": true
+    },
+    "web": {
+      "output": "single",
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/icon-only.png",
+          "imageWidth": 160,
+          "backgroundColor": "#FFF7F2"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Potluck Showdown uses your photos so you can share pictures of your dishes.",
+          "cameraPermission": "Potluck Showdown uses the camera so you can photograph your dishes."
+        }
+      ],
+      "expo-status-bar",
+      "@react-native-community/datetimepicker",
+      "expo-font"
+    ]
+  }
+}

@@ -25,8 +25,8 @@ export const PHASE_LABEL = {
 };
 
 export const PHASE_CHIP = {
-  open: 'chip-green',
-  voting: 'chip-gold',
-  tallying: 'chip-peach',
-  closed: 'chip-purple',
+  open: 'green',
+  voting: 'gold',
+  tallying: 'peach',
+  closed: 'purple',
 };

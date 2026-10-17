@@ -1,5 +1,5 @@
 // Fills the local Firebase emulators with demo data so a single tester on one
-// Android emulator can try every part of the app (claiming, voting, results).
+// phone (Expo Go) can try every part of the app (claiming, voting, results).
 //
 //   npm run emulators   (terminal 1, leave running)
 //   npm run seed        (terminal 2)
@@ -205,7 +205,7 @@ async function main() {
   console.log(`
 ✔ Demo data ready.
 
-  Sign in on the emulator as:   you@example.com   /  ${PASSWORD}
+  Sign in in the app as:       you@example.com   /  ${PASSWORD}
   (Other accounts: maya@, leo@, priya@example.com, same password.)
 
   What to try:

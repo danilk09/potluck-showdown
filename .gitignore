@@ -10,16 +10,17 @@ firestore-debug.log*
 ui-debug.log*
 .firebase/
 .idea/workspace.xml
+.playwright-mcp
 
-# Android build output (the android/ project itself is committed)
-android/app/build
-android/build
-android/.gradle
-android/local.properties
-android/app/release
+# Expo
+.expo/
+expo-env.d.ts
+web-build/
+# Native projects are generated on demand by `npx expo prebuild` (not needed for Expo Go)
+/android
+/ios
 *.keystore
 *.jks
-.playwright-mcp
 
 # Local Firebase emulator data (accounts/potlucks you create while testing)
 .emulator-data
@@ -27,6 +28,3 @@ android/app/release
 # Per-person IDE state (selected device, device lists, caches) — would cause merge conflicts
 .idea/caches/
 .idea/deviceManager.xml
-android/.idea/deploymentTargetSelector.xml
-android/.idea/deviceManager.xml
-android/.idea/caches/

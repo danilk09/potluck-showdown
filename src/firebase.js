@@ -1,19 +1,23 @@
+import { Platform } from 'react-native';
+import Constants from 'expo-constants';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { initializeApp } from 'firebase/app';
-import { connectAuthEmulator, getAuth, indexedDBLocalPersistence, initializeAuth } from 'firebase/auth';
+// getReactNativePersistence comes from Firebase's React Native build, which
+// Metro picks automatically (the web typings just don't declare it).
+import { connectAuthEmulator, getAuth, getReactNativePersistence, initializeAuth } from 'firebase/auth';
 import {
-  connectFirestoreEmulator, initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
+  connectFirestoreEmulator, initializeFirestore, memoryLocalCache, persistentLocalCache, persistentMultipleTabManager,
 } from 'firebase/firestore';
-import { Capacitor } from '@capacitor/core';
 
-const env = import.meta.env;
+const env = process.env;
 
 const config = {
-  apiKey: env.VITE_FIREBASE_API_KEY,
-  authDomain: env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: env.VITE_FIREBASE_APP_ID,
+  apiKey: env.EXPO_PUBLIC_FIREBASE_API_KEY,
+  authDomain: env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN,
+  projectId: env.EXPO_PUBLIC_FIREBASE_PROJECT_ID,
+  storageBucket: env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+  appId: env.EXPO_PUBLIC_FIREBASE_APP_ID,
 };
 
 // Without real credentials, run fully local against the Firebase emulators.
@@ -23,19 +27,31 @@ const app = initializeApp(
   usingEmulators ? { apiKey: 'demo-key', projectId: 'demo-potluck', authDomain: 'demo-potluck.firebaseapp.com' } : config,
 );
 
-// Inside the Android WebView the default popup/redirect resolver isn't usable,
-// so native builds use IndexedDB persistence directly.
-export const auth = Capacitor.isNativePlatform()
-  ? initializeAuth(app, { persistence: indexedDBLocalPersistence })
-  : getAuth(app);
+const isWeb = Platform.OS === 'web';
 
-// Persistent cache lets attended-potluck recipes load offline (see essay).
+// On phones, sign-ins persist in AsyncStorage; browsers use IndexedDB.
+export const auth = isWeb ? getAuth(app) : initializeAuth(app, { persistence: getReactNativePersistence(AsyncStorage) });
+
+// IndexedDB (offline cache) only exists in browsers; phones keep an in-memory cache.
 export const db = initializeFirestore(app, {
-  localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+  localCache: isWeb ? persistentLocalCache({ tabManager: persistentMultipleTabManager() }) : memoryLocalCache(),
+  experimentalAutoDetectLongPolling: true,
 });
 
-// 10.0.2.2 is how the Android emulator reaches the computer running it.
-export const emulatorHost = env.VITE_EMULATOR_HOST || (Capacitor.getPlatform() === 'android' ? '10.0.2.2' : '127.0.0.1');
+/**
+ * Where the emulators run. Expo Go loads the app from the dev computer, so
+ * that computer's address (from the dev server URL) also reaches the emulators.
+ */
+function detectEmulatorHost() {
+  if (env.EXPO_PUBLIC_EMULATOR_HOST) return env.EXPO_PUBLIC_EMULATOR_HOST;
+  if (isWeb) return typeof window !== 'undefined' ? window.location.hostname : '127.0.0.1';
+  const hostUri = Constants.expoConfig?.hostUri ?? Constants.expoGoConfig?.debuggerHost ?? '';
+  const host = hostUri.split(':')[0];
+  if (host) return host;
+  return Platform.OS === 'android' ? '10.0.2.2' : '127.0.0.1';
+}
+
+export const emulatorHost = detectEmulatorHost();
 
 if (usingEmulators) {
   connectAuthEmulator(auth, `http://${emulatorHost}:9099`, { disableWarnings: true });

@@ -1,11 +1,10 @@
-// Renders the app logo (SVG) into the PNGs used by the web manifest and by
-// @capacitor/assets to generate Android launcher icons + splash screens.
+// Renders the app logo (SVG) into the PNGs app.json uses for the app icon,
+// Android adaptive icon, splash screen, and web favicon.
 // Usage: npm run icons
 import { mkdirSync } from 'node:fs';
 import sharp from 'sharp';
 
 const CORAL = '#F2553A';
-const CREAM = '#FFF7F2';
 
 // A steaming pot with a gold star: the "showdown" in potluck.
 const mark = `
@@ -25,25 +24,10 @@ const svg = ({ bg = CORAL, size = 1024, scale = 1, rounded = true } = {}) => Buf
   <g transform="translate(512 512) scale(${scale}) translate(-512 -530)">${mark}</g>
 </svg>`);
 
-const splash = (dark) => Buffer.from(`
-<svg xmlns="http://www.w3.org/2000/svg" width="2732" height="2732" viewBox="0 0 2732 2732">
-  <rect width="2732" height="2732" fill="${dark ? '#221B17' : CREAM}"/>
-  <g transform="translate(1066 1066) scale(0.586)">
-    <rect width="1024" height="1024" rx="220" fill="${CORAL}"/>
-    <g transform="translate(512 512) translate(-512 -530)">${mark}</g>
-  </g>
-</svg>`);
-
 mkdirSync('assets', { recursive: true });
-mkdirSync('public/icons', { recursive: true });
 
 await sharp(svg({ rounded: false })).png().toFile('assets/icon-only.png');
-// Adaptive icon: foreground mark inside the 66% safe zone, solid background layer.
+// Adaptive icon: foreground mark inside the 66% safe zone (app.json supplies the coral background).
 await sharp(svg({ bg: null, scale: 0.62 })).png().toFile('assets/icon-foreground.png');
-await sharp({ create: { width: 1024, height: 1024, channels: 4, background: CORAL } }).png().toFile('assets/icon-background.png');
-await sharp(splash(false)).png().toFile('assets/splash.png');
-await sharp(splash(true)).png().toFile('assets/splash-dark.png');
-
-await sharp(svg()).resize(512).png().toFile('public/icons/icon-512.png');
-await sharp(svg()).resize(192).png().toFile('public/icons/icon-192.png');
-console.log('Icons written to assets/ and public/icons/');
+await sharp(svg()).resize(192).png().toFile('assets/favicon.png');
+console.log('Icons written to assets/');
