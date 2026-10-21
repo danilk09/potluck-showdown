@@ -62,7 +62,7 @@ function vote(db, voter, dishId, scores, mutate) {
 beforeAll(async () => {
   env = await initializeTestEnvironment({
     projectId: 'demo-potluck',
-    firestore: { rules: readFileSync('firestore.rules', 'utf8'), host: '127.0.0.1', port: 8080 },
+    firestore: { rules: readFileSync('firestore.rules', 'utf8'), host: '127.0.0.1', port: 8181 },
   });
 });
 afterAll(() => env?.cleanup());
@@ -135,10 +135,11 @@ describe('recipe privacy', () => {
     await assertFails(getDocs(collection(user('dan'), 'potlucks', PID, 'dishes')));
   });
 
-  it('allows one dish per member, keyed by their uid', async () => {
+  it('allows multiple dishes per member but rejects guests and forged authors', async () => {
     const db = user('alice');
-    await assertFails(setDoc(doc(db, 'potlucks', PID, 'dishes', 'someone-else'), newDishDoc(dishForm, { uid: 'alice', potluckId: PID })));
-    await assertSucceeds(setDoc(doc(db, 'potlucks', PID, 'dishes', 'alice'), newDishDoc(dishForm, { uid: 'alice', potluckId: PID })));
+    await assertSucceeds(setDoc(doc(db, 'potlucks', PID, 'dishes', 'alice-one'), newDishDoc(dishForm, { uid: 'alice', potluckId: PID })));
+    await assertSucceeds(setDoc(doc(db, 'potlucks', PID, 'dishes', 'alice-two'), newDishDoc({ ...dishForm, name: 'Salad' }, { uid: 'alice', potluckId: PID })));
+    await assertFails(setDoc(doc(db, 'potlucks', PID, 'dishes', 'forged'), newDishDoc(dishForm, { uid: 'bob', potluckId: PID })));
     await assertFails(setDoc(doc(user('dan'), 'potlucks', PID, 'dishes', 'dan'), newDishDoc(dishForm, { uid: 'dan', potluckId: PID })));
   });
 

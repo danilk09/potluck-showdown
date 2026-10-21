@@ -152,12 +152,11 @@ service cloud.firestore {
           && before.hasAll(after);
       }
 
-      // ----- dishes (one per member; doc id == author uid) -----
+      // ----- dishes (a member may contribute more than one) -----
       match /dishes/{dishId} {
         allow read: if isMember(potluckData(pid));
 
-        allow create: if dishId == me()
-          && isMember(potluckData(pid))
+        allow create: if isMember(potluckData(pid))
           && dishesEditable(potluckData(pid))
           && validDish(request.resource.data)
           && request.resource.data.authorId == me()

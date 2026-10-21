@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -18,7 +18,8 @@ import {
 } from './ui';
 import { colors, type } from '../theme';
 
-const DRAFT_KEY = 'ps-potluck-draft';
+const DRAFT_KEY = 'ps-potluck-drafts-v2';
+const LEGACY_DRAFT_KEY = 'ps-potluck-draft';
 const newId = () => `k${Math.random().toString(36).slice(2, 8)}`;
 const categoriesFor = (format) => formatInfo(format).defaultCategories.map((name) => ({ id: newId(), name, needed: 3 }));
 
@@ -30,12 +31,20 @@ function blankForm() {
   };
 }
 
-async function loadDraft() {
+async function loadDrafts(userId) {
   try {
-    const d = JSON.parse(await AsyncStorage.getItem(DRAFT_KEY));
-    return d ? { ...blankForm(), ...d, inviteCode: d.inviteCode || generateInviteCode(d.title) } : null;
+    const saved = JSON.parse(await AsyncStorage.getItem(`${DRAFT_KEY}-${userId}`));
+    if (Array.isArray(saved)) return saved;
+    const old = JSON.parse(await AsyncStorage.getItem(LEGACY_DRAFT_KEY));
+    if (old) {
+      const migrated = [{ id: newId(), updatedAt: Date.now(), form: old }];
+      await AsyncStorage.setItem(`${DRAFT_KEY}-${userId}`, JSON.stringify(migrated));
+      await AsyncStorage.removeItem(LEGACY_DRAFT_KEY);
+      return migrated;
+    }
+    return [];
   } catch {
-    return null;
+    return [];
   }
 }
 
@@ -74,13 +83,20 @@ export default function PotluckForm({ pid }) {
   if (editing && existing.status === 'closed') {
     return <Notice heading="Results are final" emoji="🏁">This showdown is over, so it can’t be edited.</Notice>;
   }
-  return <PotluckEditor key={pid ?? 'new'} existing={editing ? existing : null} />;
+  return <PotluckEditor key={pid ?? 'new'} existing={editing ? existing : null} userId={user.uid} />;
 }
 
-function PotluckEditor({ existing }) {
+function PotluckEditor({ existing, userId }) {
   const editing = Boolean(existing);
   const toast = useToast();
   const [form, setForm] = useState(() => (editing ? fromPotluck(existing) : blankForm()));
+  const [drafts, setDrafts] = useState([]);
+  const [draftId, setDraftId] = useState(() => newId());
+  const [draftsReady, setDraftsReady] = useState(false);
+  const [draftMenu, setDraftMenu] = useState(false);
+  const [draftSaved, setDraftSaved] = useState(false);
+  const [draftDirty, setDraftDirty] = useState(false);
+  const draftWrites = useRef(Promise.resolve());
   const [step, setStep] = useState(1);
   const [categoriesTouched, setCategoriesTouched] = useState(false);
   const [codeTouched, setCodeTouched] = useState(false);
@@ -91,12 +107,29 @@ function PotluckEditor({ existing }) {
   useEffect(() => {
     if (editing) return undefined;
     let alive = true;
-    loadDraft().then((d) => { if (alive && d) setForm(d); });
+    loadDrafts(userId).then((items) => { if (alive) { setDrafts(items); setDraftsReady(true); } });
     return () => { alive = false; };
-  }, [editing]);
+  }, [editing, userId]);
+
+  useEffect(() => {
+    if (editing || !draftsReady || draftSaved) return undefined;
+    if (!draftDirty) return undefined;
+    const timer = setTimeout(() => {
+      const item = { id: draftId, updatedAt: Date.now(), form };
+      setDrafts((current) => [item, ...current.filter((d) => d.id !== draftId)]);
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [draftId, draftDirty, draftsReady, draftSaved, editing, form]);
+
+  useEffect(() => {
+    if (editing || !draftsReady) return;
+    draftWrites.current = draftWrites.current.catch(() => {}).then(() => AsyncStorage.setItem(`${DRAFT_KEY}-${userId}`, JSON.stringify(drafts)));
+    draftWrites.current.catch(() => toast('Could not save draft', 'danger'));
+  }, [drafts, draftsReady, editing, toast, userId]);
 
   const scoringLocked = editing && phaseOf(existing) !== 'open';
-  const set = (key, value) => setForm((f) => ({ ...f, [key]: value }));
+  const editForm = (update) => { setDraftDirty(true); setForm(update); };
+  const set = (key, value) => editForm((f) => ({ ...f, [key]: value }));
   const field = (key) => ({ value: form[key], onChangeText: (v) => set(key, v) });
   const fmt = formatInfo(form.format);
   const total = weightsTotal(form.scoring);
@@ -112,13 +145,31 @@ function PotluckEditor({ existing }) {
   };
 
   const chooseFormat = (key) => {
-    setForm((f) => ({ ...f, format: key, ...(!editing && !categoriesTouched ? { dishCategories: categoriesFor(key) } : {}) }));
+    editForm((f) => ({ ...f, format: key, ...(!editing && !categoriesTouched ? { dishCategories: categoriesFor(key) } : {}) }));
   };
 
-  const saveDraft = async () => {
-    const { coverData: _omit, ...rest } = form;
-    await AsyncStorage.setItem(DRAFT_KEY, JSON.stringify(rest));
-    toast('Draft saved on this device');
+  const openDraft = (draft) => {
+    setDraftId(draft.id);
+    setForm({ ...blankForm(), ...draft.form });
+    setDraftDirty(false);
+    setStep(1);
+    setError('');
+  };
+
+  const newDraft = () => {
+    setDraftId(newId());
+    setForm(blankForm());
+    setDraftDirty(false);
+    setStep(1);
+    setError('');
+  };
+
+  const removeDraft = async () => {
+    const next = drafts.filter((d) => d.id !== draftId);
+    setDrafts(next);
+    draftWrites.current = draftWrites.current.catch(() => {}).then(() => AsyncStorage.setItem(`${DRAFT_KEY}-${userId}`, JSON.stringify(next)));
+    await draftWrites.current;
+    newDraft();
   };
 
   const validateStep1 = () => {
@@ -157,7 +208,8 @@ function PotluckEditor({ existing }) {
         router.back();
       } else {
         const id = await createPotluck(form);
-        await AsyncStorage.removeItem(DRAFT_KEY);
+        setDraftSaved(true);
+        await removeDraft();
         router.replace({ pathname: '/potlucks/[pid]', params: { pid: id, invite: 'new' } });
       }
     } catch (err) {
@@ -175,8 +227,15 @@ function PotluckEditor({ existing }) {
     <Screen key={step} footer={footer}>
       <PageHeader
         title={editing ? 'Edit potluck' : 'Create a potluck'}
-        actions={!editing && <Button variant="link" title="Save draft" onPress={saveDraft} />}
+        actions={!editing && <Button variant="link" title={`Drafts (${drafts.length})`} onPress={() => setDraftMenu(true)} />}
       />
+      {!editing && <OptionSheet visible={draftMenu} onClose={() => setDraftMenu(false)} title="Your planned potlucks" options={[
+        { label: 'Start a new potluck', icon: 'add-circle-outline', onPress: newDraft },
+        ...drafts.map((d) => ({ key: d.id, label: d.form.title?.trim() || 'Untitled potluck',
+          sub: d.form.date || 'Date not set', selected: d.id === draftId, onPress: () => openDraft(d) })),
+        ...(drafts.some((d) => d.id === draftId) ? [{ label: 'Delete this draft', icon: 'trash-outline', danger: true, onPress: removeDraft }] : []),
+      ]} />}
+      {!editing && <Text style={[type.small, type.muted, { marginBottom: 8 }]}>Changes to this potluck save as a draft automatically on this device.</Text>}
       {step === 2 && <Button variant="link" icon="chevron-back" title="Challenge setup" style={{ alignSelf: 'flex-start' }} onPress={() => setStep(1)} />}
       <Text style={s.step}>{step === 1 ? 'Challenge setup' : 'Dishes & voting'} · {step} of 2</Text>
       {error ? <Banner style={{ marginBottom: 12 }}>{error}</Banner> : null}
@@ -188,7 +247,7 @@ function PotluckEditor({ existing }) {
             value={form.title}
             onChangeText={(title) => {
               // Keep the suggested code readable ("HARVEST-7K2Q") until the host edits it.
-              setForm((f) => ({
+              editForm((f) => ({
                 ...f,
                 title,
                 ...(!editing && !codeTouched ? { inviteCode: `${generateInviteCode(title).split('-')[0]}-${f.inviteCode.split('-').pop()}` } : {}),
@@ -330,7 +389,7 @@ function PotluckEditor({ existing }) {
               current={form.coverImage}
               pending={form.coverData}
               onPick={(data) => set('coverData', data)}
-              onRemove={() => setForm((f) => ({ ...f, coverData: null, coverImage: null }))}
+              onRemove={() => editForm((f) => ({ ...f, coverData: null, coverImage: null }))}
             />
           </View>
         </Stack>

@@ -94,7 +94,7 @@ export default function DishDetail() {
           ? <Tile tone="mint" style={{ padding: 14, marginBottom: 16 }}><Text style={[type.body, { color: colors.mintDark }]}>✓ You rated this dish. Thanks!</Text></Tile>
           : <Button size="lg" icon="star" title="Rate this dish" style={{ marginBottom: 16 }} onPress={() => router.push(`/potlucks/${pid}/dishes/${did}/rate`)} />
       )}
-      {mine && phase === 'open' && <Button variant="outline" title="Edit my dish" style={{ marginBottom: 16 }} onPress={() => router.push(`/potlucks/${pid}/dish`)} />}
+      {mine && phase === 'open' && <Button variant="outline" title="Edit my dish" style={{ marginBottom: 16 }} onPress={() => router.push({ pathname: `/potlucks/${pid}/dish`, params: { did } })} />}
 
       {phase === 'closed' && (
         <Card style={{ padding: 14, marginBottom: 16 }}>

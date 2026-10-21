@@ -103,7 +103,7 @@ users/{uid}                     private: email, timestamps (owner only)
 publicProfiles/{uid}            displayName, photoURL, frame {tier, potluckId}
 inviteCodes/{CODE}              potluckId, hostId (unique codes)
 potlucks/{pid}                  details, format, scoring[], dishCategories[], memberIds[], status, podium[], results
-potlucks/{pid}/dishes/{uid}     one dish per member: recipe, ingredients, allergens, dietary, photo ref,
+potlucks/{pid}/dishes/{did}     multiple dishes per member: authorId, recipe, ingredients, allergens, dietary, photo ref,
                                 scoreSums{c0..c3}, ratingCount, likedBy[]
 potlucks/{pid}/ratings/{dish_uid}  anonymous ballot, readable only by the voter
 potlucks/{pid}/images/{id}      compressed photos (members only)
@@ -113,7 +113,7 @@ potlucks/{pid}/images/{id}      compressed photos (members only)
 
 ```bash
 npm test             # scoring, invite codes, phases, frames (Vitest)
-npm run test:rules   # security-rule tests (starts its own emulator; stop `npm run emulators` first)
+npm run test:rules   # security-rule tests (uses an isolated Firestore emulator on port 8181)
 npm run lint
 ```
 

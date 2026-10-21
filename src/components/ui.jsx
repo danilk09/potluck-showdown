@@ -351,19 +351,23 @@ export function OptionSheet({ visible, onClose, title, options }) {
   const insets = useSafeAreaInsets();
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
-      <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Close" />
-      <View style={[styles.sheet, { paddingBottom: 12 + insets.bottom }]}>
-        <View style={styles.sheetHandle} />
-        {title ? <Text style={[type.h4, { paddingHorizontal: 20, paddingBottom: 8 }]}>{title}</Text> : null}
-        <ScrollView style={{ maxHeight: 420 }}>
-          {options.map((o, i) => (
+      <View style={styles.sheetWrap}>
+        <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Close" />
+        <View style={[styles.sheet, { paddingBottom: 12 + insets.bottom }]}>
+          <View style={styles.sheetHandle} />
+          <View style={styles.sheetHeader}>
+            {title ? <Text style={[type.h4, { flex: 1 }]}>{title}</Text> : <View style={{ flex: 1 }} />}
+            <IconButton name="close" onPress={onClose} accessibilityLabel="Close menu" />
+          </View>
+          <ScrollView style={{ maxHeight: 420 }} keyboardShouldPersistTaps="always">
+            {options.map((o, i) => (
             <Pressable
               key={o.key ?? o.value ?? o.label ?? i}
               disabled={o.disabled}
               onPress={() => {
                 onClose();
                 // iOS can't present a dialog or picker while this sheet is still closing.
-                if (o.onPress) setTimeout(o.onPress, Platform.OS === 'ios' ? 400 : 0);
+                if (o.onPress) setTimeout(o.onPress, Platform.OS === 'web' ? 0 : 350);
               }}
               style={({ pressed }) => [styles.sheetRow, pressed && { backgroundColor: '#faf3ef' }, o.disabled && { opacity: 0.45 }]}
             >
@@ -374,8 +378,9 @@ export function OptionSheet({ visible, onClose, title, options }) {
               </View>
               {o.selected && <Icon name="checkmark" size={20} color={colors.coral} />}
             </Pressable>
-          ))}
-        </ScrollView>
+            ))}
+          </ScrollView>
+        </View>
       </View>
     </Modal>
   );
@@ -598,7 +603,9 @@ export const styles = StyleSheet.create({
   select: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   checkbox: { width: 24, height: 24, borderRadius: 6, borderWidth: 2, borderColor: '#d9c8bd', alignItems: 'center', justifyContent: 'center', backgroundColor: colors.white },
   backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(34,27,23,0.45)' },
-  sheet: { position: 'absolute', left: 0, right: 0, bottom: 0, backgroundColor: colors.white, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingTop: 8 },
+  sheetWrap: { flex: 1, justifyContent: 'flex-end' },
+  sheet: { backgroundColor: colors.white, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingTop: 8, maxHeight: '85%' },
+  sheetHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 8 },
   sheetHandle: { alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: '#e2d6ce', marginBottom: 10 },
   sheetRow: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 14, paddingHorizontal: 20, minHeight: 52 },
   dialogWrap: { flex: 1, backgroundColor: 'rgba(34,27,23,0.45)', justifyContent: 'center', padding: 20 },

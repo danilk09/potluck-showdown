@@ -127,9 +127,9 @@ export function joinPotluck(potluckId) {
 
 export async function leavePotluck(potluckId) {
   const me = uid();
-  const dishRef = doc(db, 'potlucks', potluckId, 'dishes', me);
-  const dish = await getDoc(dishRef);
-  if (dish.exists()) await deleteDish(potluckId, { id: me, ...dish.data() });
+  const dishes = await getDocs(collection(db, 'potlucks', potluckId, 'dishes'));
+  await Promise.all(dishes.docs.filter((d) => d.data().authorId === me)
+    .map((d) => deleteDish(potluckId, { id: d.id, ...d.data() })));
   await updateDoc(doc(db, 'potlucks', potluckId), { memberIds: arrayRemove(me) });
 }
 
@@ -184,7 +184,9 @@ export async function saveDish(potluckId, form, existing) {
       deleteImage(existing[key]);
     }
   }
-  const ref = doc(db, 'potlucks', potluckId, 'dishes', me);
+  const ref = existing
+    ? doc(db, 'potlucks', potluckId, 'dishes', existing.id)
+    : doc(collection(db, 'potlucks', potluckId, 'dishes'));
   if (existing) await updateDoc(ref, dishFields(values));
   else await setDoc(ref, newDishDoc(values, { uid: me, potluckId }));
 }

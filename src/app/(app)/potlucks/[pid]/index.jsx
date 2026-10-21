@@ -12,7 +12,7 @@ import { toMillis } from '../../../../lib/scoring';
 import Avatar, { AvatarStack, displayName } from '../../../../components/Avatar';
 import InviteSheet from '../../../../components/InviteSheet';
 import {
-  Button, Card, Chip, EmptyState, HeroCard, Icon, IconButton, LoadingScreen, OptionSheet, PageHeader, Row, Screen, Stack, Tile,
+  Button, Card, Chip, EmptyState, FsImage, HeroCard, Icon, IconButton, LoadingScreen, OptionSheet, PageHeader, Row, Screen, Stack, Tile,
   useConfirm, useToast,
 } from '../../../../components/ui';
 import { colors, type } from '../../../../theme';
@@ -21,10 +21,10 @@ const CAT_STYLES = [
   ['🍝', '#ffe6dc'], ['🥗', '#e2f5ea'], ['🥙', '#eee8fd'], ['🍪', '#e3f0fb'], ['🍲', '#fff1cc'], ['🧁', '#fde4ef'],
 ];
 
-function PhasePanel({ potluck, phase, isHost, dishes, ratedCount, now, onAction, busy }) {
+function PhasePanel({ potluck, phase, isHost, dishes, rateableCount, ratedCount, now, onAction, busy }) {
   const closes = toMillis(potluck.votingClosesAt);
   const opens = toMillis(potluck.votingOpensAt);
-  const toRate = dishes.length - ratedCount;
+  const toRate = rateableCount - ratedCount;
   const content = {
     open: {
       title: 'Claiming dishes',
@@ -94,7 +94,7 @@ export default function EventDetail() {
   const isHost = potluck.hostId === user.uid;
   const phase = phaseOf(potluck, now);
   const fmt = formatInfo(potluck.format);
-  const myDish = dishes.find((d) => d.authorId === user.uid);
+  const myDishes = dishes.filter((d) => d.authorId === user.uid);
   const needed = potluck.dishCategories.reduce((sum, c) => sum + c.needed, 0);
   const claimed = potluck.dishCategories.reduce((sum, c) => sum + Math.min(c.needed, dishes.filter((d) => d.categoryId === c.id).length), 0);
   const othersDishes = dishes.filter((d) => d.authorId !== user.uid);
@@ -134,7 +134,7 @@ export default function EventDetail() {
   };
 
   const onLeave = async () => {
-    if (await confirm({ title: 'Leave this potluck?', body: myDish ? 'Your dish will be removed too.' : undefined, confirmLabel: 'Leave', danger: true })) {
+    if (await confirm({ title: 'Leave this potluck?', body: myDishes.length ? 'Your dishes will be removed too.' : undefined, confirmLabel: 'Leave', danger: true })) {
       if (await run(() => leavePotluck(pid), 'You left the potluck')) router.replace('/');
     }
   };
@@ -148,9 +148,7 @@ export default function EventDetail() {
 
   const cta = (() => {
     if (phase === 'open') {
-      return myDish
-        ? <Button size="lg" variant="outlineWhite" icon="pencil" title="Edit your dish" onPress={() => router.push(`/potlucks/${pid}/dish`)} />
-        : <Button size="lg" icon="add" title="Submit Dish" onPress={() => router.push(`/potlucks/${pid}/dish`)} />;
+      return <Button size="lg" icon="add" title="Add a dish" onPress={() => router.push(`/potlucks/${pid}/dish`)} />;
     }
     if (phase === 'voting') return <Button size="lg" icon="star-outline" title="Rate dishes" onPress={() => router.push({ pathname: '/feed', params: { pid } })} />;
     if (phase === 'closed') return <Button size="lg" icon="trophy-outline" title="See results" onPress={() => router.push(`/potlucks/${pid}/results`)} />;
@@ -177,6 +175,7 @@ export default function EventDetail() {
       />
 
       <HeroCard style={{ marginBottom: 16 }}>
+        {potluck.coverImage && <View style={s.heroCover}><FsImage src={potluck.coverImage} accessibilityLabel={`${potluck.title} cover photo`} /></View>}
         <Row wrap gap={6} style={{ marginBottom: 8 }}>
           <Chip tone="default">{`${fmt.emoji} ${fmt.label}`}</Chip>
           <Chip tone={PHASE_CHIP[phase]}>{PHASE_LABEL[phase]}</Chip>
@@ -193,7 +192,7 @@ export default function EventDetail() {
         </Row>
       </HeroCard>
 
-      <PhasePanel potluck={potluck} phase={phase} isHost={isHost} dishes={othersDishes} ratedCount={ratedCount} now={now} onAction={onAction} busy={busy} />
+      <PhasePanel potluck={potluck} phase={phase} isHost={isHost} dishes={dishes} rateableCount={othersDishes.length} ratedCount={ratedCount} now={now} onAction={onAction} busy={busy} />
 
       {(potluck.formatDetail || potluck.description) ? (
         <Card style={{ padding: 14, marginBottom: 16, gap: 4 }}>
@@ -217,10 +216,15 @@ export default function EventDetail() {
               <View style={{ flex: 1, minWidth: 0 }}>
                 <Text style={[type.body, type.bold]}>{cat.name}</Text>
                 {inCat.map((d) => (
-                  <Text key={d.id} style={[type.small, type.muted, { textDecorationLine: 'underline' }]} numberOfLines={1}
-                    onPress={() => router.push(`/potlucks/${pid}/dishes/${d.id}`)}>
-                    {lookup(d.authorId)?.displayName?.split(' ')[0] ?? '…'} · {d.name}
-                  </Text>
+                  <Row key={d.id} gap={8}>
+                    <Text style={[type.small, type.muted, { textDecorationLine: 'underline', flex: 1 }]} numberOfLines={1}
+                      onPress={() => router.push(`/potlucks/${pid}/dishes/${d.id}`)}>
+                      {lookup(d.authorId)?.displayName?.split(' ')[0] ?? '…'} · {d.name}
+                    </Text>
+                    {phase === 'open' && d.authorId === user.uid && (
+                      <Button variant="link" size="sm" title="Edit" onPress={() => router.push({ pathname: `/potlucks/${pid}/dish`, params: { did: d.id } })} />
+                    )}
+                  </Row>
                 ))}
                 {missing > 0 && <Text style={[type.small, { color: colors.danger }]}>Still needs {missing} contribution{missing === 1 ? '' : 's'}</Text>}
               </View>
@@ -252,6 +256,7 @@ export default function EventDetail() {
 }
 
 const s = StyleSheet.create({
+  heroCover: { height: 190, marginHorizontal: -20, marginTop: -20, marginBottom: 16 },
   hostRow: { borderTopWidth: 1, borderTopColor: 'rgba(0,0,0,0.08)', marginTop: 10, paddingTop: 10 },
   heroSub: { color: colors.heroSub, fontWeight: '700', fontSize: 12.5, letterSpacing: 0.6, textTransform: 'uppercase', marginBottom: 2 },
   catRow: {

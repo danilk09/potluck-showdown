@@ -10,7 +10,7 @@
     "web": "expo start --web",
     "lint": "oxlint src tests -D correctness --react-plugin",
     "test": "vitest run tests/unit",
-    "test:rules": "node scripts/firebase.mjs emulators:exec --only firestore --project demo-potluck \"vitest run tests/rules\"",
+    "test:rules": "node scripts/firebase.mjs emulators:exec --config firebase.rules-test.json --only firestore --project demo-potluck \"vitest run tests/rules\"",
     "emulators": "node scripts/emulators.mjs",
     "emulators:save": "node scripts/firebase.mjs emulators:export .emulator-data --project demo-potluck --force",
     "seed": "node scripts/seed.mjs",

@@ -27,7 +27,7 @@ function fromDish(d) {
 }
 
 export default function DishForm() {
-  const { pid } = useLocalSearchParams();
+  const { pid, did } = useLocalSearchParams();
   const { user } = useAuth();
   const { data: potluck, loading } = usePotluck(pid);
   const isMember = Boolean(potluck?.memberIds.includes(user.uid));
@@ -45,8 +45,9 @@ export default function DishForm() {
       </Screen>
     );
   }
-  const existing = dishes.find((d) => d.id === user.uid);
-  return <DishEditor key={existing ? 'edit' : 'new'} potluck={potluck} dishes={dishes} existing={existing} />;
+  const existing = did ? dishes.find((d) => d.id === did && d.authorId === user.uid) : null;
+  if (did && !existing) return <Screen><PageHeader title="Edit dish" /><EmptyState title="Dish not found" /></Screen>;
+  return <DishEditor key={existing?.id ?? 'new'} potluck={potluck} dishes={dishes} existing={existing} />;
 }
 
 function DishEditor({ potluck, dishes, existing }) {
@@ -62,7 +63,7 @@ function DishEditor({ potluck, dishes, existing }) {
   const fmt = formatInfo(potluck.format);
   const set = (key, value) => setForm((f) => ({ ...f, [key]: value }));
   const field = (key) => ({ value: form[key], onChangeText: (v) => set(key, v) });
-  const counts = Object.fromEntries(potluck.dishCategories.map((c) => [c.id, dishes.filter((d) => d.categoryId === c.id && d.id !== user.uid).length]));
+  const counts = Object.fromEntries(potluck.dishCategories.map((c) => [c.id, dishes.filter((d) => d.categoryId === c.id && d.id !== existing?.id).length]));
   const needsRequired = potluck.format === 'mystery' && potluck.formatDetail;
 
   const missing = [

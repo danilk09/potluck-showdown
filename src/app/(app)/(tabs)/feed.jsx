@@ -43,7 +43,7 @@ function DishCard({ dish, potluck, phase, rated, onLike }) {
     <Card style={{ overflow: 'hidden' }}>
       <OptionSheet visible={menu} onClose={() => setMenu(false)} title={dish.name} options={[
         { label: 'View recipe', icon: 'document-text-outline', onPress: open },
-        ...(mine && phase === 'open' ? [{ label: 'Edit my dish', icon: 'pencil', onPress: () => router.push(`/potlucks/${potluck.id}/dish`) }] : []),
+        ...(mine && phase === 'open' ? [{ label: 'Edit my dish', icon: 'pencil', onPress: () => router.push({ pathname: `/potlucks/${potluck.id}/dish`, params: { did: dish.id } }) }] : []),
       ]} />
       <Row style={{ padding: 14, paddingBottom: 10 }}>
         <AuthorLine uid={dish.authorId} sub={category?.name} />

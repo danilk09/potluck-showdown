@@ -26,6 +26,16 @@ export function toValue(mode, d) {
   return `${date}T${time}`;
 }
 
+/** Update one half of a local date-time without shifting it through UTC. */
+export function setDatePart(value, date) {
+  return date ? `${date}T${value?.split('T')[1] || '18:30'}` : '';
+}
+
+export function setTimePart(value, time, today = new Date()) {
+  if (!time) return '';
+  return `${value?.split('T')[0] || toValue('date', today)}T${time}`;
+}
+
 const dateFmt = new Intl.DateTimeFormat(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
 const timeFmt = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
 
