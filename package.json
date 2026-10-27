@@ -9,15 +9,13 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "lint": "oxlint src tests -D correctness --react-plugin",
+    "typecheck": "tsc --noEmit && tsc --project convex/tsconfig.json --noEmit",
     "test": "vitest run tests/unit",
-    "test:rules": "node scripts/firebase.mjs emulators:exec --config firebase.rules-test.json --only firestore --project demo-potluck \"vitest run tests/rules\"",
-    "emulators": "node scripts/emulators.mjs",
-    "emulators:save": "node scripts/firebase.mjs emulators:export .emulator-data --project demo-potluck --force",
-    "seed": "node scripts/seed.mjs",
-    "icons": "node scripts/make-icons.mjs",
-    "build:web": "expo export --platform web",
-    "deploy:web": "expo export --platform web && node scripts/firebase.mjs deploy --only hosting",
-    "deploy:rules": "node scripts/firebase.mjs deploy --only firestore"
+    "convex:dev": "convex dev",
+    "convex:deploy": "convex deploy",
+    "seed": "tsx scripts/seed.ts",
+    "icons": "tsx scripts/make-icons.ts",
+    "build:web": "expo export --platform web"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.2",
@@ -37,7 +35,6 @@
     "expo-splash-screen": "~58.0.11",
     "expo-status-bar": "~58.0.4",
     "expo-system-ui": "~58.0.6",
-    "firebase": "^13.0.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "react-native": "0.88.0",
@@ -48,10 +45,14 @@
     "react-native-web": "~0.21.4"
   },
   "devDependencies": {
-    "@firebase/rules-unit-testing": "^6.0.0",
-    "firebase-tools": "^15.33.0",
+    "@types/node": "^26.6.5",
+    "@types/react": "^19.3.0",
+    "@types/react-native": "^0.72.8",
+    "dotenv": "^18.0.9",
     "oxlint": "^1.87.0",
     "sharp": "^0.35.5",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
     "vitest": "^4.1.11"
   },
   "engines": {
