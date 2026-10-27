@@ -12,6 +12,10 @@ ui-debug.log*
 .idea/workspace.xml
 .playwright-mcp
 
+# Convex
+.convex/
+convex/_generated/
+
 # Expo
 .expo/
 expo-env.d.ts
