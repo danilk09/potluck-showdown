@@ -2,7 +2,7 @@
 
 A mobile app for running potluck cook-offs. Hosts create a themed challenge, guests claim a dish and share the recipe, everyone rates dishes anonymously, and winners earn a profile frame. Every recipe goes into each attendee's **recipe bank**.
 
-- **App:** React Native with [Expo](https://expo.dev) (SDK 57) and Expo Router. One codebase runs on Android, iOS, and the web
+- **App:** React Native with [Expo](https://expo.dev) (SDK 58) and Expo Router. One codebase runs on Android, iOS, and the web
 - **Testing:** open it in **Expo Go** on your phone. No Android Studio or Xcode needed
 - **Web:** the same code exports to a website (Firebase Hosting), so invitees can join in a browser without installing anything
 - **Backend:** Firebase Authentication (passwords are never stored by this app) and Cloud Firestore, with security rules that enforce the privacy requirements
@@ -13,7 +13,7 @@ A mobile app for running potluck cook-offs. Hosts create a themed challenge, gue
 Android Studio works; see below), and the **Expo Go** app on your phone
 ([Android](https://play.google.com/store/apps/details?id=host.exp.exponent) ·
 [iOS](https://apps.apple.com/app/expo-go/id982107779)). Your phone and computer must be on the **same Wi-Fi network**.
-Expo Go only runs one SDK version at a time: this project uses **SDK 57**, matching the Expo Go in the app stores. If
+Expo Go only runs one SDK version at a time: this project uses **SDK 58**, matching the Expo Go in the app stores. If
 Expo Go says the project is incompatible after a store update, upgrade the project with
 `npm install expo@^<new SDK> && npx expo install --fix`.
 
