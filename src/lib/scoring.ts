@@ -1,24 +1,45 @@
 // Pure scoring helpers shared by the results page, feed, and publishing step.
 // Each dish stores per-category score sums plus a vote count, so averages and
 // weighted totals can be derived without exposing individual (anonymous) votes.
+// AI categories skip the ballots and use the dish's stored 0–100 health score.
+
+import { aiScoreOnFive, healthPoints, isAiCategory } from "./healthScore";
 
 export function categoryAverage(dish: any, categoryId: string): number | null {
   if (!dish?.ratingCount) return null;
   return (dish.scoreSums?.[categoryId] ?? 0) / dish.ratingCount;
 }
 
-/** Weighted overall score on a 1–5 scale, or null if nobody rated the dish. */
+/** One category on the 0–5 scale, or null when that category has no score yet. */
+export function categoryValue(dish: any, category: any): number | null {
+  if (isAiCategory(category)) {
+    const points = healthPoints(dish, category?.id);
+    return points == null ? null : aiScoreOnFive(points);
+  }
+  return categoryAverage(dish, category?.id);
+}
+
+/** Weighted overall score on a 0–5 scale. Manual categories need at least one vote. */
 export function overallScore(dish: any, scoring: any[]): number | null {
-  if (!dish?.ratingCount || !scoring?.length) return null;
+  if (!scoring?.length) return null;
+  const hasManual = scoring.some((c: any) => !isAiCategory(c));
+  if (hasManual && !dish?.ratingCount) return null;
   const weights = scoring.map((c: any) => Number(c.weight) || 0);
   const total = weights.reduce((a: number, b: number) => a + b, 0);
   // Fall back to equal weights if none were set.
   const w = total > 0 ? weights : scoring.map(() => 1);
   const wTotal = total > 0 ? total : scoring.length;
-  return (
-    scoring.reduce((s: number, c: any, i: number) => s + (categoryAverage(dish, c.id) ?? 0) * w[i], 0) /
-    wTotal
-  );
+  let missing = false;
+  const sum = scoring.reduce((s: number, c: any, i: number) => {
+    const value = categoryValue(dish, c);
+    if (value == null) {
+      missing = true;
+      return s;
+    }
+    return s + value * w[i];
+  }, 0);
+  if (missing) return null;
+  return sum / wTotal;
 }
 
 /** Dishes sorted best-first. Unrated dishes go last. Ties: more votes, then earlier submission. */
@@ -59,7 +80,7 @@ export function categoryAwards(dishes: any[], scoring: any[]): any[] {
     .map((cat: any) => {
       let best: any = null;
       for (const d of dishes) {
-        const avg = categoryAverage(d, cat.id);
+        const avg = categoryValue(d, cat);
         if (avg != null && (!best || avg > best.avg)) best = { dish: d, avg };
       }
       return best && { category: cat, ...best };

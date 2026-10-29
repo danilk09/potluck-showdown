@@ -1,8 +1,11 @@
+import { useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '../../../../../../hooks/AuthContext';
 import { useDocData, useMyRatings, usePotluck } from '../../../../../../hooks/useFirestore';
-import { friendlyError, toggleLike } from '../../../../../../data/api';
+import { friendlyError, saveDish, toggleLike } from '../../../../../../data/api';
+import { HealthScoreMeter, HealthScoreModal } from '../../../../../../components/HealthScoreMeter';
+import { healthPoints } from '../../../../../../lib/healthScore';
 import { phaseOf } from '../../../../../../lib/phase';
 import { categoryAverage, overallScore } from '../../../../../../lib/scoring';
 import { formatDate } from '../../../../../../lib/dates';
@@ -22,6 +25,8 @@ export default function DishDetail() {
   const isMember = Boolean(potluck?.memberIds.includes(uid));
   const { data: dish, loading: dishLoading, error } = useDocData(isMember ? `potlucks/${pid}/dishes/${did}` : null);
   const { ratings } = useMyRatings(pid, isMember);
+  const [calcCategory, setCalcCategory] = useState<any>(null);
+  const [savingScore, setSavingScore] = useState(false);
 
   if (loading || (isMember && dishLoading)) return <LoadingScreen />;
   if (!potluck || !isMember || !dish || error) {
@@ -39,6 +44,22 @@ export default function DishDetail() {
   const liked = Boolean(dish.likedBy?.includes(uid));
   const category = potluck.dishCategories.find((c: any) => c.id === dish.categoryId);
   const overall = overallScore(dish, potluck.scoring);
+  const aiScoring = potluck.scoring.filter((c: any) => c.mode === 'ai');
+  const needsVotes = potluck.scoring.some((c: any) => c.mode !== 'ai');
+
+  const saveCalculated = async (scores: Record<string, number>) => {
+    setSavingScore(true);
+    try {
+      await saveDish(pid, { ...dish, aiScores: { ...dish.aiScores, ...scores } }, dish);
+      toast('Health score saved');
+      setCalcCategory(null);
+    } catch (err) {
+      toast(friendlyError(err), 'danger');
+      setCalcCategory(null);
+    } finally {
+      setSavingScore(false);
+    }
+  };
 
   const like = async () => {
     tapFeedback();
@@ -90,7 +111,31 @@ export default function DishDetail() {
         </Row>
       </Card>
 
-      {phase === 'voting' && !mine && (
+      {aiScoring.length > 0 && (
+        <View style={{ gap: 8, marginBottom: 16 }}>
+          {aiScoring.map((c: any) => {
+            const points = healthPoints(dish, c.id);
+            if (calcCategory?.id === c.id) return null;
+            return (
+              <View key={c.id}>
+                <HealthScoreMeter
+                  title={c.name}
+                  variant="reveal"
+                  score={points}
+                  action={mine && phase === 'open' && points == null ? (
+                    <Button title="Calculate health score" onPress={() => setCalcCategory(c)} />
+                  ) : undefined}
+                />
+                {mine && phase === 'open' && points != null && (
+                  <Button variant="link" title="Calculate again" style={{ alignSelf: 'flex-start' }} onPress={() => setCalcCategory(c)} />
+                )}
+              </View>
+            );
+          })}
+        </View>
+      )}
+
+      {phase === 'voting' && !mine && needsVotes && (
         myRating
           ? <Tile tone="mint" style={{ padding: 14, marginBottom: 16 }}><Text style={[type.body, { color: colors.mintDark }]}>✓ You rated this dish. Thanks!</Text></Tile>
           : <Button size="lg" icon="star" title="Rate this dish" style={{ marginBottom: 16 }} onPress={() => router.push(`/potlucks/${pid}/dishes/${did}/rate` as any)} />
@@ -104,14 +149,16 @@ export default function DishDetail() {
             <Stars value={overall} />
           </Row>
           {potluck.scoring.map((c: any) => {
-            const avg = categoryAverage(dish, c.id);
+            const points = c.mode === 'ai' ? healthPoints(dish, c.id) : null;
+            const avg = c.mode === 'ai' ? (points == null ? null : points / 20) : categoryAverage(dish, c.id);
+            const bar = c.mode === 'ai' ? (points ?? 0) / 100 : avg ? avg / 5 : 0;
             return (
               <View key={c.id} style={{ marginBottom: 10 }}>
                 <Row justify="space-between" style={{ marginBottom: 4 }}>
-                  <Text style={type.small}>{c.name}</Text>
-                  <Text style={[type.small, type.bold]}>{avg != null ? avg.toFixed(1) : '—'}</Text>
+                  <Text style={type.small}>{c.name}{c.mode === 'ai' ? ' · AI' : ''}</Text>
+                  <Text style={[type.small, type.bold]}>{c.mode === 'ai' ? (points == null ? '—' : String(points)) : avg != null ? avg.toFixed(1) : '—'}</Text>
                 </Row>
-                <ProgressBar value={avg ? avg / 5 : 0} />
+                <ProgressBar value={bar} color={c.mode === 'ai' ? colors.mint : colors.gold} />
               </View>
             );
           })}
@@ -145,6 +192,16 @@ export default function DishDetail() {
           </View>
         )}
       </Card>
+      {calcCategory != null && (
+        <HealthScoreModal
+          visible
+          categories={[{ id: calcCategory.id, name: calcCategory.name }]}
+          saving={savingScore}
+          savingLabel="Saving score…"
+          onCancel={() => { if (!savingScore) setCalcCategory(null); }}
+          onComplete={(scores) => { void saveCalculated(scores); }}
+        />
+      )}
     </Screen>
   );
 }

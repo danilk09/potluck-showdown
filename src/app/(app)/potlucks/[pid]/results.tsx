@@ -4,6 +4,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '../../../../hooks/AuthContext';
 import { useDishes, usePotluck } from '../../../../hooks/useFirestore';
 import { useProfiles } from '../../../../hooks/useProfiles';
+import { healthPoints } from '../../../../lib/healthScore';
 import { bracketWinners, categoryAwards, rankDishes, resultsSummary } from '../../../../lib/scoring';
 import { FRAMES, FRAME_ORDER } from '../../../../lib/frames';
 import { formatDate } from '../../../../lib/dates';
@@ -145,7 +146,7 @@ export default function Results() {
               <Card key={a.category.id} style={s.award} onPress={() => openDish(a.dish.id)}>
                 <Text style={[type.caps, { color: colors.coral }]}>Top {a.category.name}</Text>
                 <Text style={[type.body, type.bold]} numberOfLines={1}>{a.dish.name}</Text>
-                <Text style={[type.small, type.muted]} numberOfLines={1}>{name(a.dish.authorId)} · {a.avg.toFixed(1)}/5</Text>
+                <Text style={[type.small, type.muted]} numberOfLines={1}>{name(a.dish.authorId)} · {a.category.mode === 'ai' ? `${healthPoints(a.dish, a.category.id) ?? Math.round(a.avg * 20)}/100 · AI` : `${a.avg.toFixed(1)}/5`}</Text>
               </Card>
             ))}
             {brackets.map((b: any) => (

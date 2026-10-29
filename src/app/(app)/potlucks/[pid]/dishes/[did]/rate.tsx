@@ -8,6 +8,8 @@ import { friendlyError, submitRating } from '../../../../../../data/api';
 import { phaseOf } from '../../../../../../lib/phase';
 import { formatDuration } from '../../../../../../lib/dates';
 import { toMillis } from '../../../../../../lib/scoring';
+import { healthPoints } from '../../../../../../lib/healthScore';
+import { HealthScoreMeter } from '../../../../../../components/HealthScoreMeter';
 import { ImpactStyle, tapFeedback } from '../../../../../../lib/platform';
 import Avatar from '../../../../../../components/Avatar';
 import {
@@ -61,8 +63,10 @@ export default function RateDish() {
 
   const left = dishes.filter((d: any) => d.authorId !== uid && !ratings.has(d.id)).length;
   const closes = toMillis(potluck.votingClosesAt);
-  const done = potluck.scoring.filter((c: any) => scores[c.id]).length;
-  const complete = done === potluck.scoring.length;
+  const manualScoring = potluck.scoring.filter((c: any) => c.mode !== 'ai');
+  const aiScoring = potluck.scoring.filter((c: any) => c.mode === 'ai');
+  const done = manualScoring.filter((c: any) => scores[c.id]).length;
+  const complete = manualScoring.length > 0 && done === manualScoring.length;
   const authorFirst = author?.displayName?.split(' ')[0];
 
   const submit = async () => {
@@ -83,7 +87,7 @@ export default function RateDish() {
   };
 
   return (
-    <Screen footer={(
+    <Screen footer={manualScoring.length === 0 ? undefined : (
       <Button size="lg" icon="trophy-outline" title={busy ? 'Submitting…' : 'Submit Rating'} disabled={!complete} loading={busy} onPress={submit} />
     )}>
       <PageHeader title="Rate this dish" actions={<Avatar uid={uid} profile={profile} size={40} />} />
@@ -108,8 +112,21 @@ export default function RateDish() {
         </View>
       </Tile>
 
+      {aiScoring.length > 0 && (
+        <Stack gap={12} style={{ marginBottom: 12 }}>
+          {aiScoring.map((c: any) => (
+            <HealthScoreMeter key={c.id} title={c.name} variant="reveal" score={healthPoints(dish, c.id)} />
+          ))}
+        </Stack>
+      )}
+
+      {manualScoring.length === 0 ? (
+        <Tile tone="mint" style={{ padding: 14 }}>
+          <Text style={[type.body, { color: colors.mintDark }]}>Health scores are calculated for each dish.</Text>
+        </Tile>
+      ) : (
       <Stack gap={12} style={{ marginBottom: 16 }}>
-        {potluck.scoring.map((c: any) => (
+        {manualScoring.map((c: any) => (
           <Card key={c.id} style={{ padding: 16 }}>
             <Row justify="space-between">
               <Text style={type.h3}>{c.name}</Text>
@@ -121,11 +138,12 @@ export default function RateDish() {
           </Card>
         ))}
       </Stack>
+      )}
 
       {error ? <Banner style={{ marginBottom: 12 }}>{error}</Banner> : null}
-      {complete
+      {manualScoring.length > 0 && (complete
         ? <Tile tone="mint" style={{ paddingVertical: 10, paddingHorizontal: 14 }}><Text style={[type.small, { color: colors.mintDark }]}>✓ Ready to submit. All ratings are complete.</Text></Tile>
-        : <Text style={[type.small, type.muted]}>Rate all {potluck.scoring.length} categories to submit. Votes are final.</Text>}
+        : <Text style={[type.small, type.muted]}>Rate {manualScoring.length === 1 ? manualScoring[0].name : `all ${manualScoring.length} guest categories`} to submit. Votes are final.</Text>)}
     </Screen>
   );
 }

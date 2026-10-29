@@ -3,7 +3,8 @@ import { bracketWinners, categoryAwards, overallScore, podiumFrom, rankDishes, r
 import { generateInviteCode, isValidInviteCode, normalizeInviteCode } from "../../src/lib/inviteCode";
 import { phaseOf } from "../../src/lib/phase";
 import { earnedFrames, winCount } from "../../src/lib/frames";
-import { toList } from "../../src/data/builders";
+import { dishFields, potluckFields, toList } from "../../src/data/builders";
+import { aiScoreOnFive, healthPoints, mockHealthScore, supportsAiScoring } from "../../src/lib/healthScore";
 
 const scoring = [
   { id: "c0", name: "Deliciousness", weight: 60 },
@@ -60,6 +61,36 @@ describe("scoring", () => {
     expect(awards.map((a) => a.dish.id)).toEqual(["tasty", "healthy"]);
   });
 
+  it("uses a stored AI health score instead of votes for that category", () => {
+    const mixed = [
+      { id: "c0", name: "Deliciousness", weight: 60, mode: "manual" },
+      { id: "c1", name: "Healthiness", weight: 40, mode: "ai" },
+    ];
+    const scored = dish("a", { c0: 5 }, 1, { aiScores: { c1: 80 } });
+    expect(overallScore(scored, mixed)).toBeCloseTo(4.6);
+    expect(overallScore(dish("a", { c0: 5 }, 1), mixed)).toBeNull();
+    const awards = categoryAwards(
+      [scored, dish("b", { c0: 3 }, 1, { aiScores: { c1: 95 } })],
+      mixed
+    );
+    expect(awards.map((a) => a.dish.id)).toEqual(["a", "b"]);
+  });
+
+  it("ranks dishes on AI scores alone when every category is calculated", () => {
+    const only = [{ id: "c1", name: "Healthiness", weight: 100, mode: "ai" }];
+    const ranked = rankDishes(
+      [
+        dish("low", {}, 0, { aiScores: { c1: 40 } }),
+        dish("high", {}, 0, { aiScores: { c1: 90 } }),
+        dish("none", {}, 0),
+      ],
+      only
+    );
+    expect(ranked.map((d) => d.id)).toEqual(["high", "low", "none"]);
+    expect(ranked[0].overall).toBeCloseTo(4.5);
+    expect(ranked[2].overall).toBeNull();
+  });
+
   it("summarizes the results", () => {
     const ranked = rankDishes([dish("a", { c0: 10, c1: 10 }, 2), dish("b", { c0: 3, c1: 3 }, 1)], scoring);
     expect(resultsSummary(ranked, 5)).toEqual({
@@ -111,6 +142,40 @@ describe("frames", () => {
       "host:p2",
     ]);
     expect(winCount("me", potlucks)).toBe(1);
+  });
+});
+
+describe("health scores", () => {
+  it("rolls a stand-in score from 0 to 100", () => {
+    expect(mockHealthScore(() => 0)).toBe(0);
+    expect(mockHealthScore(() => 0.999)).toBe(100);
+    expect(mockHealthScore(() => 1)).toBe(100);
+    expect(aiScoreOnFive(80)).toBe(4);
+    expect(healthPoints({ aiScores: { c1: 82.4 } }, "c1")).toBe(82);
+    expect(healthPoints({ aiScores: {} }, "c1")).toBeNull();
+  });
+
+  it("offers AI scoring for health categories", () => {
+    expect(supportsAiScoring("Healthiness")).toBe(true);
+    expect(supportsAiScoring("healthy swaps")).toBe(true);
+    expect(supportsAiScoring("Deliciousness")).toBe(false);
+  });
+
+  it("stores the scoring mode and the dish score", () => {
+    const fields = potluckFields({
+      title: "Harvest",
+      date: "2026-10-29",
+      time: "18:30",
+      format: "classic",
+      scoring: [
+        { name: "Deliciousness", weight: 60 },
+        { name: "Healthiness", weight: 40, mode: "ai" },
+      ],
+      dishCategories: [],
+    });
+    expect(fields.scoring.map((c: any) => c.mode ?? "manual")).toEqual(["manual", "ai"]);
+    expect(dishFields({ name: "Soup", categoryId: "k", aiScores: { c1: 80 } }).aiScores).toEqual({ c1: 80 });
+    expect(dishFields({ name: "Soup", categoryId: "k" }).aiScores).toBeUndefined();
   });
 });
 
