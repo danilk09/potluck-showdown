@@ -4,6 +4,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '../../../../hooks/AuthContext';
 import { useDishes, usePotluck } from '../../../../hooks/useFirestore';
 import { deleteDish, friendlyError, saveDish } from '../../../../data/api';
+import { HealthScoreModal } from '../../../../components/HealthScoreMeter';
 import { COMMON_ALLERGENS, DIETARY_LABELS, formatInfo } from '../../../../lib/formats';
 import { phaseOf } from '../../../../lib/phase';
 import Avatar from '../../../../components/Avatar';
@@ -75,6 +76,7 @@ function DishEditor({ potluck, dishes, existing }: { potluck: any; dishes: any[]
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [extraAllergen, setExtraAllergen] = useState('');
+  const [calc, setCalc] = useState<{ saving: boolean } | null>(null);
 
   const uid = user?.uid || '';
   const fmt = formatInfo(potluck.format);
@@ -82,6 +84,7 @@ function DishEditor({ potluck, dishes, existing }: { potluck: any; dishes: any[]
   const field = (key: string) => ({ value: (form as any)[key], onChangeText: (v: string) => set(key, v) });
   const counts = Object.fromEntries(potluck.dishCategories.map((c: any) => [c.id, dishes.filter((d: any) => d.categoryId === c.id && d.id !== existing?.id).length]));
   const needsRequired = potluck.format === 'mystery' && potluck.formatDetail;
+  const aiCategories = potluck.scoring.filter((c: any) => c.mode === 'ai');
 
   const missing = [
     !form.name.trim() && 'dish name',
@@ -90,21 +93,34 @@ function DishEditor({ potluck, dishes, existing }: { potluck: any; dishes: any[]
     needsRequired && !form.usedRequired && 'required-ingredient check',
   ].filter(Boolean) as string[];
 
-  const submit = async () => {
+  const persist = async (aiScores?: Record<string, number>) => {
+    setBusy(true);
+    setError('');
+    try {
+      const payload = aiScores
+        ? { ...form, aiScores: { ...existing?.aiScores, ...aiScores } }
+        : form;
+      await saveDish(pid, payload, existing);
+      toast(existing ? 'Dish updated' : 'Dish added! 🎉');
+      router.back();
+    } catch (err) {
+      setCalc(null);
+      setError(friendlyError(err));
+      setBusy(false);
+    }
+  };
+
+  const submit = () => {
+    if (calc) return;
     if (missing.length) {
       setError(`Please add: ${missing.join(', ')}.`);
       return;
     }
-    setBusy(true);
-    setError('');
-    try {
-      await saveDish(pid, form, existing);
-      toast(existing ? 'Dish updated' : 'Dish added! 🎉');
-      router.back();
-    } catch (err) {
-      setError(friendlyError(err));
-      setBusy(false);
+    if (aiCategories.length) {
+      setCalc({ saving: false });
+      return;
     }
+    void persist();
   };
 
   const remove = async () => {
@@ -125,7 +141,14 @@ function DishEditor({ potluck, dishes, existing }: { potluck: any; dishes: any[]
   };
 
   return (
-    <Screen footer={<Button size="lg" title={busy ? 'Saving…' : existing ? 'Save Dish' : 'Add Dish'} loading={busy} onPress={submit} />}>
+    <Screen footer={(
+      <Button
+        size="lg"
+        title={busy ? 'Saving…' : aiCategories.length ? (existing ? 'Calculate & save' : 'Calculate & add dish') : existing ? 'Save Dish' : 'Add Dish'}
+        loading={busy}
+        onPress={submit}
+      />
+    )}>
       {confirmEl}
       <PageHeader title={existing ? 'Edit your dish' : 'Add your dish'} actions={<Avatar uid={uid} profile={profile} size={40} />} />
 
@@ -142,8 +165,8 @@ function DishEditor({ potluck, dishes, existing }: { potluck: any; dishes: any[]
         <Row wrap gap={8}>
           {potluck.scoring.map((c: any) => (
             <View key={c.id} style={{ flexGrow: 1, flexBasis: '45%', backgroundColor: colors.white, borderRadius: 12, padding: 10 }}>
-              <Text style={[type.small, type.muted]}>{c.name} · {c.weight}%</Text>
-              <Text style={[type.small, { fontWeight: '600' }]}>{c.description}</Text>
+              <Text style={[type.small, type.muted]}>{c.name} · {c.weight}%{c.mode === 'ai' ? ' · AI' : ''}</Text>
+              <Text style={[type.small, { fontWeight: '600' }]}>{c.mode === 'ai' ? 'Calculated when you save' : c.description}</Text>
             </View>
           ))}
         </Row>
@@ -224,6 +247,19 @@ function DishEditor({ potluck, dishes, existing }: { potluck: any; dishes: any[]
 
         {existing && <Button variant="linkDanger" title="Remove my dish" onPress={remove} />}
       </Stack>
+      {calc != null && (
+        <HealthScoreModal
+          visible
+          categories={aiCategories.map((c: any) => ({ id: c.id, name: c.name }))}
+          saving={calc.saving}
+          savingLabel="Saving dish…"
+          onCancel={() => { if (!calc.saving) setCalc(null); }}
+          onComplete={(scores) => {
+            setCalc({ saving: true });
+            void persist(scores);
+          }}
+        />
+      )}
     </Screen>
   );
 }

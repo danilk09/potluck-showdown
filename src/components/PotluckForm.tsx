@@ -7,10 +7,12 @@ import { usePotluck } from "../hooks/useFirestore";
 import { createPotluck, friendlyError, updatePotluck } from "../data/api";
 import { DEFAULT_SCORING, FORMATS, FORMAT_KEYS, MAX_SCORING, SCORING_SUGGESTIONS, formatInfo } from "../lib/formats";
 import { generateInviteCode, isValidInviteCode, normalizeInviteCode } from "../lib/inviteCode";
+import { supportsAiScoring } from "../lib/healthScore";
 import { weightsTotal } from "../lib/scoring";
 import { phaseOf } from "../lib/phase";
 import { toInputDate, toInputDateTime, toInputTime } from "../lib/dates";
 import DateTimeField from "./DateTimeField";
+import { HealthScoreModal } from "./HealthScoreMeter";
 import PhotoPicker from "./PhotoPicker";
 import {
   Banner,
@@ -156,6 +158,7 @@ function PotluckEditor({ existing, userId }: { existing: any; userId: string }) 
   const [categoriesTouched, setCategoriesTouched] = useState(false);
   const [codeTouched, setCodeTouched] = useState(false);
   const [addMenu, setAddMenu] = useState(false);
+  const [scorePreview, setScorePreview] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -490,14 +493,16 @@ function PotluckEditor({ existing, userId }: { existing: any; userId: string }) 
                         maxLength={30}
                         placeholder="Category name"
                         accessibilityLabel="Category name"
-                        onChangeText={(v) => setScoring(i, { name: v })}
+                        onChangeText={(v) =>
+                          setScoring(i, supportsAiScoring(v) ? { name: v } : { name: v, mode: "manual" })
+                        }
                       />
                       <Input
                         style={[s.bare, { fontWeight: "400", fontSize: 14, color: colors.muted }]}
                         value={c.description}
                         editable={!scoringLocked}
                         maxLength={100}
-                        placeholder="What should voters judge?"
+                        placeholder={c.mode === "ai" ? "Shown beside the calculated score" : "What should voters judge?"}
                         accessibilityLabel="Category description"
                         onChangeText={(v) => setScoring(i, { description: v })}
                       />
@@ -522,6 +527,54 @@ function PotluckEditor({ existing, userId }: { existing: any; userId: string }) 
                       />
                     )}
                   </Row>
+                  {supportsAiScoring(c.name) && (
+                    <View style={{ marginTop: 10 }}>
+                      <Text style={[type.small, type.muted, { marginBottom: 6 }]}>How healthiness is scored</Text>
+                      <Row gap={8} align="stretch">
+                        {(
+                          [
+                            ["manual", "Manual", "Guests give stars"],
+                            ["ai", "AI calculated", "Scored for each dish"],
+                          ] as const
+                        ).map(([mode, label, sub]) => {
+                          const on = (c.mode === "ai" ? "ai" : "manual") === mode;
+                          return (
+                            <Pressable
+                              key={mode}
+                              disabled={scoringLocked}
+                              accessibilityRole="radio"
+                              accessibilityState={{ selected: on, disabled: scoringLocked }}
+                              accessibilityLabel={`${label}. ${sub}`}
+                              onPress={() => setScoring(i, { mode })}
+                              style={[
+                                s.modeBtn,
+                                on && (mode === "ai" ? s.modeAi : s.modeManual),
+                                scoringLocked && { opacity: 0.55 },
+                              ]}
+                            >
+                              <Text style={[type.small, type.bold]}>{label}</Text>
+                              <Text style={[type.small, type.muted]}>{sub}</Text>
+                            </Pressable>
+                          );
+                        })}
+                      </Row>
+                      {c.mode === "ai" && (
+                        <>
+                          <Hint>
+                            Saving a dish plays a short calculation and stores a stand-in score. Real AI scoring comes
+                            later.
+                          </Hint>
+                          <Button
+                            variant="link"
+                            icon="sparkles"
+                            title="Preview the calculation"
+                            style={{ alignSelf: "flex-start" }}
+                            onPress={() => setScorePreview(c.name || "Healthiness")}
+                          />
+                        </>
+                      )}
+                    </View>
+                  )}
                 </Card>
               ))}
             </Stack>
@@ -665,6 +718,14 @@ function PotluckEditor({ existing, userId }: { existing: any; userId: string }) 
           </View>
         </Stack>
       )}
+      {scorePreview != null && (
+        <HealthScoreModal
+          visible
+          purpose="preview"
+          categories={[{ id: "preview", name: scorePreview }]}
+          onCancel={() => setScorePreview(null)}
+        />
+      )}
     </Screen>
   );
 }
@@ -684,4 +745,17 @@ const s = StyleSheet.create({
   },
   formatOn: { borderColor: colors.coral, borderWidth: 2 },
   bare: { borderWidth: 0, paddingHorizontal: 0, paddingVertical: 4, fontWeight: "700", backgroundColor: "transparent" },
+  modeBtn: {
+    flex: 1,
+    minHeight: 64,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.white,
+    gap: 2,
+  },
+  modeManual: { borderColor: colors.coral, borderWidth: 2, backgroundColor: colors.peachSoft },
+  modeAi: { borderColor: colors.mint, borderWidth: 2, backgroundColor: colors.mintSoft },
 });

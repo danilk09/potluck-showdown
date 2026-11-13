@@ -21,6 +21,7 @@ export function potluckFields(form: any) {
     name: (c.name || "").trim(),
     description: (c.description ?? "").trim(),
     weight: Number(c.weight) || 0,
+    ...(c.mode === "ai" ? { mode: "ai" as const } : {}),
   }));
   const startsAtDate = localDateTime(form.date, form.time);
   return {
@@ -92,6 +93,7 @@ export function dishFields(form: any) {
     recipePhoto: form.recipePhoto ?? null,
     usedRequired: Boolean(form.usedRequired),
     updatedAt: Date.now(),
+    ...(form.aiScores && typeof form.aiScores === "object" ? { aiScores: form.aiScores } : {}),
   };
 }
 

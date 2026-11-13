@@ -1,15 +1,28 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
-import type { Doc } from "./_generated/dataModel";
-import {
-  deleteImageRef, dishesEditable, fail, getDish, getPotluck, getSessionUser, isMember, potlucksForUser,
-  requireMember, requireOwnImage, requirePotluck, requireUser, validateDishForm,
-} from "./lib/access";
-import { deleteDishCascade } from "./lib/cascade";
+import { Id } from "./_generated/dataModel";
 
-const withId = (d: Doc<"dishes">) => ({ id: d._id, ...d });
+function cleanAiScores(raw: unknown): Record<string, number> | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const out: Record<string, number> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    const n = Number(value);
+    if (!key || !Number.isFinite(n)) continue;
+    out[key] = Math.max(0, Math.min(100, Math.round(n)));
+  }
+  return Object.keys(out).length ? out : undefined;
+}
 
-/** Dishes (and their recipes) are only visible to that potluck's members. */
+async function getUserByToken(ctx: any, sessionToken: string) {
+  if (!sessionToken) throw new Error("Please sign in first.");
+  const user = await ctx.db
+    .query("users")
+    .withIndex("by_sessionToken", (q: any) => q.eq("sessionToken", sessionToken))
+    .first();
+  if (!user) throw new Error("Please sign in first.");
+  return user;
+}
+
 export const listByPotluck = query({
   args: { sessionToken: v.string(), potluckId: v.string() },
   handler: async (ctx, args) => {
@@ -66,11 +79,12 @@ export const claim = mutation({
     await requireOwnImage(ctx, fields.recipePhoto, potluck._id, user._id);
 
     const now = Date.now();
-    return await ctx.db.insert("dishes", {
-      ...fields,
-      potluckId: potluck._id,
+    const aiScores = cleanAiScores(args.form.aiScores);
+    const dishId = await ctx.db.insert("dishes", {
+      potluckId: args.potluckId,
       authorId: user._id,
       scoreSums: {},
+      ...(aiScores ? { aiScores } : {}),
       ratingCount: 0,
       likedBy: [],
       createdAt: now,
@@ -82,21 +96,33 @@ export const claim = mutation({
 export const update = mutation({
   args: { sessionToken: v.string(), dishId: v.string(), form: v.any() },
   handler: async (ctx, args) => {
-    const user = await requireUser(ctx, args.sessionToken);
-    const dish = await getDish(ctx, args.dishId);
-    if (!dish) fail("Dish not found.");
-    if (dish.authorId !== user._id) fail("Only the dish creator can edit this dish.");
-    const potluck = await requirePotluck(ctx, dish.potluckId);
-    if (!dishesEditable(potluck)) fail("Voting has started, so dishes are locked.");
+    const user = await getUserByToken(ctx, args.sessionToken);
+    const dish = await ctx.db.get(args.dishId as Id<"dishes">);
+    if (!dish) throw new Error("Dish not found.");
+    if (dish.authorId !== user._id) throw new Error("Only the dish creator can edit this dish.");
 
-    const fields = validateDishForm({ ...dish, ...args.form }, potluck);
-    for (const key of ["photo", "recipePhoto"] as const) {
-      if (fields[key] !== (dish[key] ?? null)) {
-        await requireOwnImage(ctx, fields[key], potluck._id, user._id);
-        await deleteImageRef(ctx, dish[key]);
-      }
+    const now = Date.now();
+    const patch: any = {
+      name: args.form.name !== undefined ? args.form.name.trim() : dish.name,
+      categoryId: args.form.categoryId ?? dish.categoryId,
+      serves: args.form.serves !== undefined ? args.form.serves.trim() : dish.serves,
+      ingredients: args.form.ingredients ?? dish.ingredients,
+      steps: args.form.steps !== undefined ? args.form.steps.trim() : dish.steps,
+      allergens: args.form.allergens ?? dish.allergens,
+      dietary: args.form.dietary ?? dish.dietary,
+      prepMinutes: args.form.prepMinutes !== undefined ? args.form.prepMinutes : dish.prepMinutes,
+      calories: args.form.calories !== undefined ? args.form.calories : dish.calories,
+      photo: args.form.photo !== undefined ? args.form.photo : dish.photo,
+      recipePhoto: args.form.recipePhoto !== undefined ? args.form.recipePhoto : dish.recipePhoto,
+      usedRequired: args.form.usedRequired !== undefined ? Boolean(args.form.usedRequired) : dish.usedRequired,
+      updatedAt: now,
+    };
+    if (args.form.aiScores !== undefined) {
+      const aiScores = cleanAiScores(args.form.aiScores);
+      if (aiScores) patch.aiScores = { ...(dish.aiScores ?? {}), ...aiScores };
     }
-    await ctx.db.patch(dish._id, { ...fields, updatedAt: Date.now() });
+
+    await ctx.db.patch(dish._id, patch);
     return dish._id;
   },
 });
