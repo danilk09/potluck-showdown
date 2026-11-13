@@ -1,89 +1,58 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
-import { Id } from "./_generated/dataModel";
+import {
+  fail, getDish, getSessionUser, requireMember, requirePotluck, requireUser, validateScores, votingLive,
+} from "./lib/access";
 
-async function getUserByToken(ctx: any, sessionToken: string) {
-  if (!sessionToken) throw new Error("Please sign in first.");
-  const user = await ctx.db
-    .query("users")
-    .withIndex("by_sessionToken", (q: any) => q.eq("sessionToken", sessionToken))
-    .first();
-  if (!user) throw new Error("Please sign in first.");
-  return user;
-}
-
+/** The caller's own ballots in a potluck. Nobody else's votes are ever returned. */
 export const listMyRatings = query({
-  args: {
-    userId: v.optional(v.union(v.string(), v.null())),
-    potluckId: v.string(),
-  },
+  args: { sessionToken: v.string(), potluckId: v.string() },
   handler: async (ctx, args) => {
-    if (!args.userId || !args.potluckId) return [];
+    const user = await getSessionUser(ctx, args.sessionToken);
+    if (!user || !args.potluckId) return [];
     const ballots = await ctx.db
       .query("ballots")
-      .withIndex("by_potluck_user", (q) =>
-        q.eq("potluckId", args.potluckId).eq("userId", args.userId!)
-      )
+      .withIndex("by_potluck_user", (q) => q.eq("potluckId", args.potluckId).eq("userId", user._id))
       .collect();
     return ballots.map((b) => ({ id: b._id, dishId: b.dishId, scores: b.scores }));
   },
 });
 
+/** Records a ballot and adds it to the dish's running totals in one transaction. */
 export const submitBallot = mutation({
   args: {
     sessionToken: v.string(),
     potluckId: v.string(),
     dishId: v.string(),
-    scores: v.any(), // Record<string, number>
+    scores: v.record(v.string(), v.number()),
   },
   handler: async (ctx, args) => {
-    const user = await getUserByToken(ctx, args.sessionToken);
-    const potluck = await ctx.db.get(args.potluckId as Id<"potlucks">);
-    if (!potluck) throw new Error("Potluck not found.");
-    if (potluck.status !== "voting") {
-      throw new Error("Voting is not currently open for this potluck.");
-    }
+    const user = await requireUser(ctx, args.sessionToken);
+    const potluck = await requirePotluck(ctx, args.potluckId);
+    requireMember(potluck, user);
+    if (!votingLive(potluck)) fail("Voting is not currently open for this potluck.");
 
-    const dish = await ctx.db.get(args.dishId as Id<"dishes">);
-    if (!dish) throw new Error("Dish not found.");
-    if (dish.authorId === user._id) {
-      throw new Error("You cannot vote for your own dish.");
-    }
+    const dish = await getDish(ctx, args.dishId);
+    if (!dish || dish.potluckId !== potluck._id) fail("Dish not found.");
+    if (dish.authorId === user._id) fail("You cannot vote for your own dish.");
+    const scores = validateScores(args.scores, potluck);
 
-    // Check if user already voted on this dish
     const existing = await ctx.db
       .query("ballots")
-      .withIndex("by_potluck_user", (q) =>
-        q.eq("potluckId", args.potluckId).eq("userId", user._id)
-      )
-      .filter((q) => q.eq(q.field("dishId"), args.dishId))
+      .withIndex("by_dish_user", (q) => q.eq("dishId", dish._id).eq("userId", user._id))
       .first();
+    if (existing) fail("You have already rated this dish.");
 
-    if (existing) {
-      throw new Error("You have already rated this dish.");
-    }
-
-    // Insert ballot
     await ctx.db.insert("ballots", {
-      potluckId: args.potluckId,
-      dishId: args.dishId,
+      potluckId: potluck._id,
+      dishId: dish._id,
       userId: user._id,
-      scores: args.scores,
+      scores,
       createdAt: Date.now(),
     });
-
-    // Atomically increment dish score sums and rating count
-    const scoreSums = { ...(dish.scoreSums || {}) };
-    for (const [catId, val] of Object.entries(args.scores)) {
-      scoreSums[catId] = (scoreSums[catId] || 0) + Number(val);
-    }
-
-    await ctx.db.patch(dish._id, {
-      scoreSums,
-      ratingCount: (dish.ratingCount || 0) + 1,
-      updatedAt: Date.now(),
-    });
-
+    const scoreSums = { ...(dish.scoreSums ?? {}) };
+    for (const [id, value] of Object.entries(scores)) scoreSums[id] = (scoreSums[id] ?? 0) + value;
+    await ctx.db.patch(dish._id, { scoreSums, ratingCount: dish.ratingCount + 1 });
     return { success: true };
   },
 });

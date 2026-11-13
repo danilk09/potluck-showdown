@@ -1,37 +1,21 @@
-import { ConvexHttpClient } from 'convex/browser';
-import { api } from '../convex/_generated/api';
-import * as dotenv from 'dotenv';
+// Fills your dev deployment with demo data. The seed function is internal (it
+// wipes the database), so it runs through the Convex CLI with your deploy
+// credentials instead of over the public client API.
+import { execSync } from 'node:child_process';
 
-dotenv.config({ path: '.env.local' });
-dotenv.config({ path: '.env' });
+console.log('Seeding demo database (Alex, Maya, Leo, Priya + 4 potlucks + dishes + ratings)…');
+try {
+  execSync('npx convex run seedDemo:run', { stdio: 'inherit' });
+} catch {
+  console.error('\n✖ Seeding failed. Run `npx convex dev` first so the CLI knows your dev deployment.\n');
+  process.exit(1);
+}
 
-const convexUrl = process.env.EXPO_PUBLIC_CONVEX_URL || process.env.CONVEX_URL;
-
-async function main() {
-  if (!convexUrl) {
-    console.error('\n✖ Missing EXPO_PUBLIC_CONVEX_URL. Please set it in your .env file or run `npx convex dev` first.\n');
-    process.exit(1);
-  }
-
-  console.log(`Connecting to Convex at: ${convexUrl}…`);
-  const client = new ConvexHttpClient(convexUrl);
-
-  console.log('Seeding demo database with default data (Alex, Maya, Leo, Priya + 4 potlucks + dishes + ratings)…');
-  const result: any = await client.mutation(api.seed.defaultSeed, {});
-
-  console.log(`
+console.log(`
 ✔ Demo data ready on Convex!
-
-${result?.message || 'Demo data generated.'}
 
 Sign in credentials:
   Email:    you@example.com
   Password: password123
 (Other accounts: maya@example.com, leo@example.com, priya@example.com, same password.)
 `);
-}
-
-main().catch((err) => {
-  console.error('\n✖ Seeding failed:', err.message);
-  process.exit(1);
-});

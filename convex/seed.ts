@@ -1,10 +1,13 @@
-import { mutation } from "./_generated/server";
+import { internalMutation } from "./_generated/server";
+import { v } from "convex/values";
 
-export const defaultSeed = mutation({
-  args: {},
-  handler: async (ctx) => {
+// Internal: only `npx convex run seedDemo:run` (an admin) can call this. It
+// wipes the database, so it must never be reachable from the app.
+export const defaultSeed = internalMutation({
+  args: { passwordHash: v.string() },
+  handler: async (ctx, { passwordHash }) => {
     // 1. Wipe all existing collections
-    const collections = ["users", "potlucks", "dishes", "ballots", "inviteCodes", "images"] as const;
+    const collections = ["users", "sessions", "passwordResets", "potlucks", "dishes", "ballots", "inviteCodes", "images"] as const;
     for (const coll of collections) {
       const records = await ctx.db.query(coll).collect();
       for (const rec of records) {
@@ -21,51 +24,46 @@ export const defaultSeed = mutation({
     };
 
     // 2. Create Users
-    const PASSWORD = "password123";
     const youId = await ctx.db.insert("users", {
       email: "you@example.com",
-      password: PASSWORD,
+      passwordHash,
       displayName: "Alex Rivera",
       photoURL: null,
       frame: null,
       isGuest: false,
-      sessionToken: "tok_you_demo",
       createdAt: now,
       lastSeenAt: now,
     });
 
     const mayaId = await ctx.db.insert("users", {
       email: "maya@example.com",
-      password: PASSWORD,
+      passwordHash,
       displayName: "Maya Chen",
       photoURL: null,
       frame: null,
       isGuest: false,
-      sessionToken: "tok_maya_demo",
       createdAt: now,
       lastSeenAt: now,
     });
 
     const leoId = await ctx.db.insert("users", {
       email: "leo@example.com",
-      password: PASSWORD,
+      passwordHash,
       displayName: "Leo Martinez",
       photoURL: null,
       frame: null,
       isGuest: false,
-      sessionToken: "tok_leo_demo",
       createdAt: now,
       lastSeenAt: now,
     });
 
     const priyaId = await ctx.db.insert("users", {
       email: "priya@example.com",
-      password: PASSWORD,
+      passwordHash,
       displayName: "Priya Shah",
       photoURL: null,
       frame: null,
       isGuest: false,
-      sessionToken: "tok_priya_demo",
       createdAt: now,
       lastSeenAt: now,
     });

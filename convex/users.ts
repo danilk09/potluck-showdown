@@ -1,270 +1,116 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
-import { Id } from "./_generated/dataModel";
+import type { Doc } from "./_generated/dataModel";
+import {
+  FRAME_TIERS, SESSION_TTL_MS, fail, frameEarned, getPotluck, getSessionUser, requireUser,
+} from "./lib/access";
 
-function generateToken() {
-  return "tok_" + Math.random().toString(36).substring(2) + Date.now().toString(36);
+const MAX_PROFILE_PHOTO = 120_000;
+
+function publicProfile(user: Doc<"users">) {
+  return {
+    displayName: user.displayName,
+    photoURL: user.photoURL ?? null,
+    frame: user.frame ?? null,
+    isGuest: user.isGuest,
+  };
 }
 
 export const currentUser = query({
   args: { sessionToken: v.optional(v.union(v.string(), v.null())) },
   handler: async (ctx, args) => {
-    if (!args.sessionToken) return null;
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_sessionToken", (q) => q.eq("sessionToken", args.sessionToken!))
-      .first();
+    const user = await getSessionUser(ctx, args.sessionToken);
     if (!user) return null;
     return {
       uid: user._id,
       email: user.email ?? null,
-      displayName: user.displayName,
-      photoURL: user.photoURL ?? null,
-      frame: user.frame ?? null,
+      ...publicProfile(user),
       isAnonymous: user.isGuest,
-      isGuest: user.isGuest,
       createdAt: user.createdAt,
     };
   },
 });
 
-export const getProfile = query({
-  args: { userId: v.string() },
-  handler: async (ctx, args) => {
-    try {
-      const user = await ctx.db.get(args.userId as Id<"users">);
-      if (!user) return null;
-      return {
-        displayName: user.displayName,
-        photoURL: user.photoURL ?? null,
-        frame: user.frame ?? null,
-        isGuest: user.isGuest,
-      };
-    } catch {
-      return null;
-    }
-  },
-});
-
+/** Names, avatars and frames by id. Signed-in users only, and never a full listing. */
 export const getProfiles = query({
-  args: { userIds: v.array(v.string()) },
+  args: { sessionToken: v.string(), userIds: v.array(v.string()) },
   handler: async (ctx, args) => {
-    const results: Record<string, any> = {};
-    for (const uid of args.userIds) {
-      if (!uid) continue;
-      try {
-        const user = await ctx.db.get(uid as Id<"users">);
-        if (user) {
-          results[uid] = {
-            displayName: user.displayName,
-            photoURL: user.photoURL ?? null,
-            frame: user.frame ?? null,
-            isGuest: user.isGuest,
-          };
-        }
-      } catch {
-        // ignore invalid ID format
-      }
+    const results: Record<string, ReturnType<typeof publicProfile>> = {};
+    if (!(await getSessionUser(ctx, args.sessionToken))) return results;
+    for (const uid of args.userIds.slice(0, 200)) {
+      const id = ctx.db.normalizeId("users", uid);
+      const user = id ? await ctx.db.get(id) : null;
+      if (user) results[uid] = publicProfile(user);
     }
     return results;
-  },
-});
-
-export const signUp = mutation({
-  args: {
-    email: v.string(),
-    password: v.string(),
-    displayName: v.string(),
-  },
-  handler: async (ctx, args) => {
-    const email = args.email.trim().toLowerCase();
-    const existing = await ctx.db
-      .query("users")
-      .withIndex("by_email", (q) => q.eq("email", email))
-      .first();
-    if (existing) {
-      throw new Error("An account already uses that email. Try signing in instead.");
-    }
-    const sessionToken = generateToken();
-    const now = Date.now();
-    const userId = await ctx.db.insert("users", {
-      email,
-      password: args.password,
-      displayName: args.displayName.trim() || "Potluck guest",
-      photoURL: null,
-      frame: null,
-      isGuest: false,
-      sessionToken,
-      createdAt: now,
-      lastSeenAt: now,
-    });
-    return {
-      userId,
-      sessionToken,
-      user: {
-        uid: userId,
-        email,
-        displayName: args.displayName.trim() || "Potluck guest",
-        photoURL: null,
-        frame: null,
-        isAnonymous: false,
-        isGuest: false,
-        createdAt: now,
-      },
-    };
-  },
-});
-
-export const signIn = mutation({
-  args: {
-    email: v.string(),
-    password: v.string(),
-  },
-  handler: async (ctx, args) => {
-    const email = args.email.trim().toLowerCase();
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_email", (q) => q.eq("email", email))
-      .first();
-    if (!user || user.password !== args.password) {
-      throw new Error("That email and password don’t match.");
-    }
-    const sessionToken = generateToken();
-    await ctx.db.patch(user._id, {
-      sessionToken,
-      lastSeenAt: Date.now(),
-    });
-    return {
-      userId: user._id,
-      sessionToken,
-      user: {
-        uid: user._id,
-        email: user.email ?? null,
-        displayName: user.displayName,
-        photoURL: user.photoURL ?? null,
-        frame: user.frame ?? null,
-        isAnonymous: user.isGuest,
-        isGuest: user.isGuest,
-        createdAt: user.createdAt,
-      },
-    };
-  },
-});
-
-export const signInGuest = mutation({
-  args: {
-    displayName: v.optional(v.string()),
-  },
-  handler: async (ctx, args) => {
-    const sessionToken = generateToken();
-    const now = Date.now();
-    const displayName = (args.displayName ?? "").trim() || "Potluck guest";
-    const userId = await ctx.db.insert("users", {
-      displayName,
-      photoURL: null,
-      frame: null,
-      isGuest: true,
-      sessionToken,
-      createdAt: now,
-      lastSeenAt: now,
-    });
-    return {
-      userId,
-      sessionToken,
-      user: {
-        uid: userId,
-        email: null,
-        displayName,
-        photoURL: null,
-        frame: null,
-        isAnonymous: true,
-        isGuest: true,
-        createdAt: now,
-      },
-    };
-  },
-});
-
-export const upgradeGuest = mutation({
-  args: {
-    sessionToken: v.string(),
-    email: v.string(),
-    password: v.string(),
-    displayName: v.optional(v.string()),
-  },
-  handler: async (ctx, args) => {
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_sessionToken", (q) => q.eq("sessionToken", args.sessionToken))
-      .first();
-    if (!user) throw new Error("User session not found.");
-
-    const email = args.email.trim().toLowerCase();
-    const existing = await ctx.db
-      .query("users")
-      .withIndex("by_email", (q) => q.eq("email", email))
-      .first();
-    if (existing && existing._id !== user._id) {
-      throw new Error("An account already uses that email.");
-    }
-
-    const patch: any = {
-      email,
-      password: args.password,
-      isGuest: false,
-      lastSeenAt: Date.now(),
-    };
-    if (args.displayName?.trim()) {
-      patch.displayName = args.displayName.trim();
-    }
-    await ctx.db.patch(user._id, patch);
-    return { success: true };
   },
 });
 
 export const updateProfile = mutation({
   args: {
     sessionToken: v.string(),
-    patch: v.any(),
+    patch: v.object({
+      displayName: v.optional(v.string()),
+      photoURL: v.optional(v.union(v.string(), v.null())),
+      frame: v.optional(v.union(v.object({ tier: v.string(), potluckId: v.string() }), v.null())),
+    }),
   },
   handler: async (ctx, args) => {
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_sessionToken", (q) => q.eq("sessionToken", args.sessionToken))
-      .first();
-    if (!user) throw new Error("Unauthorized");
+    const user = await requireUser(ctx, args.sessionToken);
+    const { displayName, photoURL, frame } = args.patch;
+    const update: Partial<Doc<"users">> = { lastSeenAt: Date.now() };
 
-    const allowedPatch: any = {};
-    if (args.patch.displayName !== undefined) allowedPatch.displayName = args.patch.displayName;
-    if (args.patch.photoURL !== undefined) allowedPatch.photoURL = args.patch.photoURL;
-    if (args.patch.frame !== undefined) allowedPatch.frame = args.patch.frame;
-    allowedPatch.lastSeenAt = Date.now();
+    if (displayName !== undefined) {
+      const name = displayName.trim();
+      if (name.length < 1 || name.length > 40) fail("Names must be 1 to 40 characters.");
+      update.displayName = name;
+    }
+    if (photoURL !== undefined) {
+      if (photoURL !== null && (photoURL.length > MAX_PROFILE_PHOTO || !/^data:image\/(jpeg|png|webp);base64,/.test(photoURL))) {
+        fail("That photo is too large or isn’t an image.");
+      }
+      update.photoURL = photoURL;
+    }
+    if (frame !== undefined) {
+      if (frame !== null) {
+        if (!(FRAME_TIERS as readonly string[]).includes(frame.tier)) fail("Unknown frame.");
+        if (!frameEarned(frame.tier, await getPotluck(ctx, frame.potluckId), user._id)) {
+          fail("You haven’t earned that frame yet.");
+        }
+      }
+      update.frame = frame;
+    }
 
-    await ctx.db.patch(user._id, allowedPatch);
+    await ctx.db.patch(user._id, update);
     return { success: true };
   },
 });
 
-export const deleteAccount = mutation({
-  args: {
-    sessionToken: v.string(),
-  },
+/** Ends this device's session on the server, not just on the phone. */
+export const signOut = mutation({
+  args: { sessionToken: v.string() },
   handler: async (ctx, args) => {
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_sessionToken", (q) => q.eq("sessionToken", args.sessionToken))
-      .first();
-    if (!user) return;
+    const session = await ctx.db
+      .query("sessions")
+      .withIndex("by_token", (q) => q.eq("token", args.sessionToken))
+      .unique();
+    if (session) await ctx.db.delete(session._id);
+  },
+});
 
-    // Delete user's dishes
-    const dishes = await ctx.db
-      .query("dishes")
-      .withIndex("by_authorId", (q) => q.eq("authorId", user._id))
-      .collect();
-    for (const d of dishes) {
-      await ctx.db.delete(d._id);
+/** Pushes the expiry out while the app is in use (at most once a day). */
+export const refreshSession = mutation({
+  args: { sessionToken: v.string() },
+  handler: async (ctx, args) => {
+    const session = await ctx.db
+      .query("sessions")
+      .withIndex("by_token", (q) => q.eq("token", args.sessionToken))
+      .unique();
+    const now = Date.now();
+    if (!session || session.expiresAt <= now) return;
+    if (session.expiresAt - now < SESSION_TTL_MS - 24 * 60 * 60 * 1000) {
+      await ctx.db.patch(session._id, { expiresAt: now + SESSION_TTL_MS });
+      await ctx.db.patch(session.userId, { lastSeenAt: now });
     }
-
-    await ctx.db.delete(user._id);
   },
 });

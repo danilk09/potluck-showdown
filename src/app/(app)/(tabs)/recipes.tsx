@@ -1,14 +1,13 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
-import { useMyPotlucks } from '../../../hooks/useFirestore';
+import { useMyPotlucks, useRecipeBank } from '../../../hooks/useFirestore';
 import { useProfiles } from '../../../hooks/useProfiles';
-import { friendlyError, loadRecipeBank } from '../../../data/api';
 import { DIETARY_LABELS } from '../../../lib/formats';
 import { overallScore, toMillis } from '../../../lib/scoring';
 import { formatDate } from '../../../lib/dates';
 import {
-  Banner, Button, Card, Chip, ChipToggleGroup, EmptyState, FsImage, Icon, Input, Loading, PageHeader, Row, Screen, SelectField, Stars,
+  Button, Card, Chip, ChipToggleGroup, EmptyState, FsImage, Icon, Input, Loading, PageHeader, Row, Screen, SelectField, Stars,
 } from '../../../components/ui';
 import { colors, type } from '../../../theme';
 
@@ -23,33 +22,16 @@ const SORTS = [
  * The recipe bank: every dish from every potluck the user attended.
  */
 export default function RecipeBank() {
-  const { data: potlucks, loading } = useMyPotlucks();
-  const [recipes, setRecipes] = useState<any[] | null>(null);
-  const [error, setError] = useState('');
+  const { data: potlucks } = useMyPotlucks();
+  // Live: new dishes and newly joined potlucks show up without a reload.
+  const { data: recipes, loading } = useRecipeBank();
   const [search, setSearch] = useState('');
   const [potluckFilter, setPotluckFilter] = useState('');
   const [dietary, setDietary] = useState<string[]>([]);
   const [sort, setSort] = useState('recent');
-  const lookup = useProfiles(recipes?.map((r) => r.authorId) ?? []);
-  const potluckKey = potlucks.map((p) => p.id).join(',');
-
-  useEffect(() => {
-    if (loading) return undefined;
-    let alive = true;
-    loadRecipeBank(potlucks)
-      .then((r) => {
-        if (alive) setRecipes(r);
-      })
-      .catch((err) => {
-        if (alive) setError(friendlyError(err));
-      });
-    return () => { alive = false; };
-    // Reload when the set of potlucks changes, not on every snapshot.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, potluckKey]);
+  const lookup = useProfiles(recipes.map((r) => r.authorId));
 
   const results = useMemo(() => {
-    if (!recipes) return [];
     const terms = search.toLowerCase().split(/\s+/).filter(Boolean);
     return recipes
       .map((r) => ({ ...r, overall: overallScore(r, r.potluck.scoring) }))
@@ -100,8 +82,7 @@ export default function RecipeBank() {
         <ChipToggleGroup scroll options={DIETARY_LABELS.slice(0, 6)} value={dietary} onChange={setDietary} />
       </View>
 
-      {error ? <Banner style={{ marginBottom: 12 }}>{error}</Banner> : null}
-      {loading || (!recipes && !error) ? <Loading label="Gathering your recipes…" /> : results.length === 0 ? (
+      {loading ? <Loading label="Gathering your recipes…" /> : results.length === 0 ? (
         <EmptyState emoji={filtered ? '🔍' : '📖'} title={filtered ? 'No matching recipes' : 'Your recipe bank is empty'}
           action={filtered ? <Button variant="outline" title="Clear filters" onPress={() => { setSearch(''); setPotluckFilter(''); setDietary([]); }} /> : null}>
           {filtered ? 'Try a different search or filter.' : 'Join a potluck and recipes from it will collect here.'}

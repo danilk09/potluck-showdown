@@ -6,9 +6,9 @@ import { useAuth } from "./AuthContext";
 
 /** All potlucks the signed-in user belongs to, soonest first. */
 export function useMyPotlucks() {
-  const { user } = useAuth();
+  const { user, sessionToken } = useAuth();
   const uid = user?.uid;
-  const potlucks = useQuery(api.potlucks.listMyPotlucks, uid ? { userId: uid } : "skip");
+  const potlucks = useQuery(api.potlucks.listMyPotlucks, uid && sessionToken ? { sessionToken } : "skip");
   const data = useMemo(() => {
     if (!potlucks) return [];
     return [...potlucks].sort((a, b) => toMillis(a.startsAt) - toMillis(b.startsAt));
@@ -22,7 +22,8 @@ export function useMyPotlucks() {
 }
 
 export function usePotluck(potluckId?: string | null) {
-  const potluck = useQuery(api.potlucks.get, potluckId ? { potluckId } : "skip");
+  const { sessionToken } = useAuth();
+  const potluck = useQuery(api.potlucks.get, potluckId && sessionToken ? { sessionToken, potluckId } : "skip");
   return {
     data: potluck ?? null,
     loading: potluck === undefined && Boolean(potluckId),
@@ -31,7 +32,8 @@ export function usePotluck(potluckId?: string | null) {
 }
 
 export function useDish(dishId?: string | null) {
-  const dish = useQuery(api.dishes.get, dishId ? { dishId } : "skip");
+  const { sessionToken } = useAuth();
+  const dish = useQuery(api.dishes.get, dishId && sessionToken ? { sessionToken, dishId } : "skip");
   return {
     data: dish ?? null,
     loading: dish === undefined && Boolean(dishId),
@@ -40,12 +42,13 @@ export function useDish(dishId?: string | null) {
 }
 
 export function useDocData(path?: string | null): { data: any; loading: boolean; error: any } {
+  const { sessionToken } = useAuth();
   const isDish = Boolean(path?.includes('/dishes/'));
   const dishId = isDish ? path!.split('/dishes/')[1] : null;
   const potluckId = !isDish && path?.startsWith('potlucks/') ? path.replace('potlucks/', '') : null;
 
-  const dish = useQuery(api.dishes.get, dishId ? { dishId } : "skip");
-  const potluck = useQuery(api.potlucks.get, potluckId ? { potluckId } : "skip");
+  const dish = useQuery(api.dishes.get, dishId && sessionToken ? { sessionToken, dishId } : "skip");
+  const potluck = useQuery(api.potlucks.get, potluckId && sessionToken ? { sessionToken, potluckId } : "skip");
 
   const data = isDish ? (dish ?? null) : (potluck ?? null);
   const loading = isDish ? dish === undefined && Boolean(dishId) : potluck === undefined && Boolean(potluckId);
@@ -59,9 +62,10 @@ export function useDocData(path?: string | null): { data: any; loading: boolean;
 
 /** Dishes are only readable by members, so pass `enabled` once membership is known. */
 export function useDishes(potluckId?: string | null, enabled: boolean = true) {
+  const { sessionToken } = useAuth();
   const dishes = useQuery(
     api.dishes.listByPotluck,
-    potluckId && enabled ? { potluckId } : "skip"
+    potluckId && enabled && sessionToken ? { sessionToken, potluckId } : "skip"
   );
   return {
     data: dishes ?? [],
@@ -72,11 +76,11 @@ export function useDishes(potluckId?: string | null, enabled: boolean = true) {
 
 /** Set of dish ids the current user already rated in this potluck. */
 export function useMyRatings(potluckId?: string | null, enabled: boolean = true) {
-  const { user } = useAuth();
+  const { user, sessionToken } = useAuth();
   const uid = user?.uid;
   const res = useQuery(
     api.voting.listMyRatings,
-    potluckId && uid && enabled ? { userId: uid, potluckId } : "skip"
+    potluckId && uid && enabled && sessionToken ? { sessionToken, potluckId } : "skip"
   );
   const ratings = useMemo(() => {
     if (!res) return new Map<string, any>();
@@ -89,6 +93,13 @@ export function useMyRatings(potluckId?: string | null, enabled: boolean = true)
     loading: res === undefined && Boolean(potluckId && uid && enabled),
     error: null,
   };
+}
+
+/** The recipe bank: every dish from every potluck the user belongs to, each with its potluck. Live. */
+export function useRecipeBank() {
+  const { sessionToken } = useAuth();
+  const recipes = useQuery(api.dishes.recipeBank, sessionToken ? { sessionToken } : "skip");
+  return { data: recipes ?? [], loading: recipes === undefined && Boolean(sessionToken) };
 }
 
 /** Re-renders periodically so time-based phases (scheduled voting) update on their own. */

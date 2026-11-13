@@ -1,174 +1,131 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
-import { Id } from "./_generated/dataModel";
+import type { Doc } from "./_generated/dataModel";
+import {
+  deleteImageRef, dishesEditable, fail, getDish, getPotluck, getSessionUser, isMember, potlucksForUser,
+  requireMember, requireOwnImage, requirePotluck, requireUser, validateDishForm,
+} from "./lib/access";
+import { deleteDishCascade } from "./lib/cascade";
 
-async function getUserByToken(ctx: any, sessionToken: string) {
-  if (!sessionToken) throw new Error("Please sign in first.");
-  const user = await ctx.db
-    .query("users")
-    .withIndex("by_sessionToken", (q: any) => q.eq("sessionToken", sessionToken))
-    .first();
-  if (!user) throw new Error("Please sign in first.");
-  return user;
-}
+const withId = (d: Doc<"dishes">) => ({ id: d._id, ...d });
 
+/** Dishes (and their recipes) are only visible to that potluck's members. */
 export const listByPotluck = query({
-  args: { potluckId: v.string() },
+  args: { sessionToken: v.string(), potluckId: v.string() },
   handler: async (ctx, args) => {
-    if (!args.potluckId) return [];
+    const user = await getSessionUser(ctx, args.sessionToken);
+    const potluck = await getPotluck(ctx, args.potluckId);
+    if (!user || !potluck || !isMember(potluck, user._id)) return [];
     const dishes = await ctx.db
       .query("dishes")
-      .withIndex("by_potluckId", (q) => q.eq("potluckId", args.potluckId))
+      .withIndex("by_potluckId", (q) => q.eq("potluckId", potluck._id))
       .collect();
-    return dishes.map((d) => ({ id: d._id, ...d }));
+    return dishes.map(withId);
   },
 });
 
 export const get = query({
-  args: { dishId: v.string() },
+  args: { sessionToken: v.string(), dishId: v.string() },
   handler: async (ctx, args) => {
-    if (!args.dishId) return null;
-    try {
-      const dish = await ctx.db.get(args.dishId as Id<"dishes">);
-      if (!dish) return null;
-      return { id: dish._id, ...dish };
-    } catch {
-      return null;
-    }
+    const user = await getSessionUser(ctx, args.sessionToken);
+    const dish = await getDish(ctx, args.dishId);
+    const potluck = dish ? await getPotluck(ctx, dish.potluckId) : null;
+    if (!user || !dish || !potluck || !isMember(potluck, user._id)) return null;
+    return withId(dish);
   },
 });
 
-export const listAllForUser = query({
-  args: { userId: v.optional(v.union(v.string(), v.null())) },
+/** The recipe bank: every dish from every potluck the caller belongs to, with its potluck. Live. */
+export const recipeBank = query({
+  args: { sessionToken: v.string() },
   handler: async (ctx, args) => {
-    if (!args.userId) return [];
-    const potlucks = await ctx.db.query("potlucks").collect();
-    const myPotluckIds = new Set(
-      potlucks.filter((p) => p.memberIds?.includes(args.userId!)).map((p) => p._id.toString())
-    );
-    const allDishes = await ctx.db.query("dishes").collect();
-    const accessible = allDishes.filter((d) => myPotluckIds.has(d.potluckId));
-    return accessible.map((d) => ({ id: d._id, ...d }));
+    const user = await getSessionUser(ctx, args.sessionToken);
+    if (!user) return [];
+    const out = [];
+    for (const p of await potlucksForUser(ctx, user._id)) {
+      const dishes = await ctx.db
+        .query("dishes")
+        .withIndex("by_potluckId", (q) => q.eq("potluckId", p._id))
+        .collect();
+      const potluck = { id: p._id, ...p };
+      for (const d of dishes) out.push({ ...withId(d), potluck });
+    }
+    return out;
   },
 });
 
 export const claim = mutation({
-  args: {
-    sessionToken: v.string(),
-    potluckId: v.string(),
-    form: v.any(),
-  },
+  args: { sessionToken: v.string(), potluckId: v.string(), form: v.any() },
   handler: async (ctx, args) => {
-    const user = await getUserByToken(ctx, args.sessionToken);
-    const potluck = await ctx.db.get(args.potluckId as Id<"potlucks">);
-    if (!potluck) throw new Error("Potluck not found.");
-
-    // Ensure user is in memberIds
-    if (!potluck.memberIds.includes(user._id)) {
-      await ctx.db.patch(potluck._id, {
-        memberIds: [...potluck.memberIds, user._id],
-        updatedAt: Date.now(),
-      });
-    }
+    const user = await requireUser(ctx, args.sessionToken);
+    const potluck = await requirePotluck(ctx, args.potluckId);
+    requireMember(potluck, user);
+    if (!dishesEditable(potluck)) fail("Voting has started, so dishes are locked.");
+    const fields = validateDishForm(args.form, potluck);
+    await requireOwnImage(ctx, fields.photo, potluck._id, user._id);
+    await requireOwnImage(ctx, fields.recipePhoto, potluck._id, user._id);
 
     const now = Date.now();
-    const dishId = await ctx.db.insert("dishes", {
-      potluckId: args.potluckId,
+    return await ctx.db.insert("dishes", {
+      ...fields,
+      potluckId: potluck._id,
       authorId: user._id,
-      name: args.form.name.trim(),
-      categoryId: args.form.categoryId,
-      serves: (args.form.serves ?? "").trim(),
-      ingredients: args.form.ingredients ?? [],
-      steps: (args.form.steps ?? "").trim(),
-      allergens: args.form.allergens ?? [],
-      dietary: args.form.dietary ?? [],
-      prepMinutes: args.form.prepMinutes ?? null,
-      calories: args.form.calories ?? null,
-      photo: args.form.photo ?? null,
-      recipePhoto: args.form.recipePhoto ?? null,
-      usedRequired: Boolean(args.form.usedRequired),
       scoreSums: {},
       ratingCount: 0,
       likedBy: [],
       createdAt: now,
       updatedAt: now,
     });
-
-    return dishId;
   },
 });
 
 export const update = mutation({
-  args: {
-    sessionToken: v.string(),
-    dishId: v.string(),
-    form: v.any(),
-  },
+  args: { sessionToken: v.string(), dishId: v.string(), form: v.any() },
   handler: async (ctx, args) => {
-    const user = await getUserByToken(ctx, args.sessionToken);
-    const dish = await ctx.db.get(args.dishId as Id<"dishes">);
-    if (!dish) throw new Error("Dish not found.");
-    if (dish.authorId !== user._id) throw new Error("Only the dish creator can edit this dish.");
+    const user = await requireUser(ctx, args.sessionToken);
+    const dish = await getDish(ctx, args.dishId);
+    if (!dish) fail("Dish not found.");
+    if (dish.authorId !== user._id) fail("Only the dish creator can edit this dish.");
+    const potluck = await requirePotluck(ctx, dish.potluckId);
+    if (!dishesEditable(potluck)) fail("Voting has started, so dishes are locked.");
 
-    const now = Date.now();
-    const patch: any = {
-      name: args.form.name !== undefined ? args.form.name.trim() : dish.name,
-      categoryId: args.form.categoryId ?? dish.categoryId,
-      serves: args.form.serves !== undefined ? args.form.serves.trim() : dish.serves,
-      ingredients: args.form.ingredients ?? dish.ingredients,
-      steps: args.form.steps !== undefined ? args.form.steps.trim() : dish.steps,
-      allergens: args.form.allergens ?? dish.allergens,
-      dietary: args.form.dietary ?? dish.dietary,
-      prepMinutes: args.form.prepMinutes !== undefined ? args.form.prepMinutes : dish.prepMinutes,
-      calories: args.form.calories !== undefined ? args.form.calories : dish.calories,
-      photo: args.form.photo !== undefined ? args.form.photo : dish.photo,
-      recipePhoto: args.form.recipePhoto !== undefined ? args.form.recipePhoto : dish.recipePhoto,
-      usedRequired: args.form.usedRequired !== undefined ? Boolean(args.form.usedRequired) : dish.usedRequired,
-      updatedAt: now,
-    };
-
-    await ctx.db.patch(dish._id, patch);
+    const fields = validateDishForm({ ...dish, ...args.form }, potluck);
+    for (const key of ["photo", "recipePhoto"] as const) {
+      if (fields[key] !== (dish[key] ?? null)) {
+        await requireOwnImage(ctx, fields[key], potluck._id, user._id);
+        await deleteImageRef(ctx, dish[key]);
+      }
+    }
+    await ctx.db.patch(dish._id, { ...fields, updatedAt: Date.now() });
     return dish._id;
   },
 });
 
 export const deleteDish = mutation({
-  args: {
-    sessionToken: v.string(),
-    dishId: v.string(),
-  },
+  args: { sessionToken: v.string(), dishId: v.string() },
   handler: async (ctx, args) => {
-    const user = await getUserByToken(ctx, args.sessionToken);
-    const dish = await ctx.db.get(args.dishId as Id<"dishes">);
+    const user = await requireUser(ctx, args.sessionToken);
+    const dish = await getDish(ctx, args.dishId);
     if (!dish) return;
-    if (dish.authorId !== user._id) {
-      // Also allow potluck host to delete
-      const potluck = await ctx.db.get(dish.potluckId as Id<"potlucks">);
-      if (!potluck || potluck.hostId !== user._id) {
-        throw new Error("You don’t have permission to delete this dish.");
-      }
-    }
-    await ctx.db.delete(dish._id);
+    const potluck = await requirePotluck(ctx, dish.potluckId);
+    const authorMayDelete = dish.authorId === user._id && dishesEditable(potluck);
+    const hostMayDelete = potluck.hostId === user._id && potluck.status !== "closed";
+    if (!authorMayDelete && !hostMayDelete) fail("You don’t have permission to delete this dish.");
+    await deleteDishCascade(ctx, dish);
   },
 });
 
 export const toggleLike = mutation({
-  args: {
-    sessionToken: v.string(),
-    dishId: v.string(),
-  },
+  args: { sessionToken: v.string(), dishId: v.string() },
   handler: async (ctx, args) => {
-    const user = await getUserByToken(ctx, args.sessionToken);
-    const dish = await ctx.db.get(args.dishId as Id<"dishes">);
-    if (!dish) return;
+    const user = await requireUser(ctx, args.sessionToken);
+    const dish = await getDish(ctx, args.dishId);
+    if (!dish) return false;
+    requireMember(await requirePotluck(ctx, dish.potluckId), user);
 
-    const likedBy = dish.likedBy ?? [];
-    const hasLiked = likedBy.includes(user._id);
-    const newLikedBy = hasLiked ? likedBy.filter((id) => id !== user._id) : [...likedBy, user._id];
-
+    const hasLiked = dish.likedBy.includes(user._id);
     await ctx.db.patch(dish._id, {
-      likedBy: newLikedBy,
-      updatedAt: Date.now(),
+      likedBy: hasLiked ? dish.likedBy.filter((id) => id !== user._id) : [...dish.likedBy, user._id],
     });
     return !hasLiked;
   },

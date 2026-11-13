@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
+import { useAuth } from "./AuthContext";
 
 const cache = new Map<string, any>();
 const listeners = new Set<() => void>();
@@ -16,6 +17,7 @@ export function primeProfile(uid: string, data: any) {
 
 /** Returns a lookup `(uid) => profile | null | undefined` and loads missing ones. */
 export function useProfiles(uids?: (string | null | undefined)[]) {
+  const { sessionToken } = useAuth();
   const cleanUids = useMemo(
     () => Array.from(new Set((uids ?? []).filter(Boolean) as string[])),
     [uids]
@@ -23,7 +25,7 @@ export function useProfiles(uids?: (string | null | undefined)[]) {
 
   const profilesMap = useQuery(
     api.users.getProfiles,
-    cleanUids.length > 0 ? { userIds: cleanUids } : "skip"
+    cleanUids.length > 0 && sessionToken ? { sessionToken, userIds: cleanUids } : "skip"
   );
 
   return useMemo(() => {

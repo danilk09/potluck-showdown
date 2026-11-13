@@ -2,7 +2,6 @@ import { convex, getStoredToken } from "../convex";
 import { api } from "../../convex/_generated/api";
 import { dishFields, potluckFields } from "./builders";
 import { IMAGE_REF_PREFIX, isImageRef } from "../lib/images";
-import { podiumFrom, rankDishes, resultsSummary } from "../lib/scoring";
 import { normalizeInviteCode } from "../lib/inviteCode";
 
 async function token(): Promise<string> {
@@ -12,6 +11,8 @@ async function token(): Promise<string> {
 }
 
 export function friendlyError(err: any): string {
+  // Server checks throw ConvexError, whose readable message is in `data`.
+  if (typeof err?.data === "string") return err.data;
   const message = err?.message || String(err);
   if (message.includes("permission-denied") || message.includes("Unauthorized")) {
     return "You don’t have permission to do that right now.";
@@ -23,10 +24,6 @@ export function friendlyError(err: any): string {
 }
 
 // ---------- profiles ----------
-
-export async function ensureProfile(_user: any, _displayName?: string) {
-  // Handled by Convex auth mutations
-}
 
 export async function updateMyProfile(patch: any) {
   const t = await token();
@@ -54,8 +51,8 @@ export function loadImage(ref?: string | null): Promise<string | null> {
     const [, imageId] = ref.slice(IMAGE_REF_PREFIX.length).split("/");
     imageCache.set(
       ref,
-      convex
-        .query(api.images.get, { imageId })
+      token()
+        .then((sessionToken) => convex.query(api.images.get, { sessionToken, imageId }))
         .catch((err) => {
           imageCache.delete(ref);
           throw err;
@@ -65,9 +62,15 @@ export function loadImage(ref?: string | null): Promise<string | null> {
   return imageCache.get(ref)!;
 }
 
-async function deleteImage(ref?: string | null) {
-  if (!ref || !isImageRef(ref)) return;
-  imageCache.delete(ref);
+/** The server deletes replaced photos itself; this just forgets the cached copy. */
+function forgetImage(ref?: string | null) {
+  if (ref && isImageRef(ref)) imageCache.delete(ref);
+}
+
+/** Removes a photo that was uploaded but never saved onto anything. */
+async function discardUpload(ref: string) {
+  forgetImage(ref);
+  await convex.mutation(api.images.remove, { sessionToken: await token(), ref }).catch(() => {});
 }
 
 // ---------- potlucks ----------
@@ -95,22 +98,26 @@ export async function createPotluck(form: any): Promise<string> {
 export async function updatePotluck(potluck: any, form: any): Promise<void> {
   const t = await token();
   let coverImage = form.coverImage ?? null;
-  if (form.coverData) {
-    coverImage = await uploadImage(potluck.id, form.coverData);
-    if (potluck.coverImage) deleteImage(potluck.coverImage);
+  const uploaded = form.coverData ? await uploadImage(potluck.id, form.coverData) : null;
+  if (uploaded) coverImage = uploaded;
+  try {
+    await convex.mutation(api.potlucks.update, {
+      sessionToken: t,
+      potluckId: potluck.id,
+      form: { ...potluckFields({ ...form, coverImage }) },
+    });
+  } catch (err) {
+    if (uploaded) await discardUpload(uploaded);
+    throw err;
   }
-  await convex.mutation(api.potlucks.update, {
-    sessionToken: t,
-    potluckId: potluck.id,
-    form: { ...potluckFields({ ...form, coverImage }) },
-  });
+  if (coverImage !== potluck.coverImage) forgetImage(potluck.coverImage);
 }
 
 /** Looks up an invite code and returns the potluck (or null). */
 export async function lookupInvite(rawCode: string): Promise<any | null> {
   const code = normalizeInviteCode(rawCode);
   if (!code) return null;
-  return await convex.query(api.potlucks.lookupByInvite, { code });
+  return await convex.query(api.potlucks.lookupByInvite, { sessionToken: await token(), code });
 }
 
 export async function joinPotluck(potluckId: string): Promise<void> {
@@ -130,8 +137,8 @@ export async function removeGuest(potluckId: string, guestId: string): Promise<v
 
 export async function deletePotluck(potluck: any): Promise<void> {
   const t = await token();
-  if (potluck.coverImage) await deleteImage(potluck.coverImage);
   await convex.mutation(api.potlucks.deletePotluck, { sessionToken: t, potluckId: potluck.id });
+  forgetImage(potluck.coverImage);
 }
 
 export async function openVoting(potluck: any): Promise<void> {
@@ -139,24 +146,10 @@ export async function openVoting(potluck: any): Promise<void> {
   await convex.mutation(api.potlucks.openVoting, { sessionToken: t, potluckId: potluck.id });
 }
 
-/**
- * Closes voting and records the podium.
- */
+/** Closes voting. The server ranks the dishes and records the podium. */
 export async function publishResults(potluck: any): Promise<void> {
   const t = await token();
-  const dishes = await convex.query(api.dishes.listByPotluck, { potluckId: potluck.id });
-  const ranked = rankDishes(dishes, potluck.scoring);
-  const podium = podiumFrom(ranked);
-  const results = {
-    ...resultsSummary(ranked, potluck.memberIds?.length || 0),
-    publishedAt: Date.now(),
-  };
-  await convex.mutation(api.potlucks.closeVoting, {
-    sessionToken: t,
-    potluckId: potluck.id,
-    podium,
-    results,
-  });
+  await convex.mutation(api.potlucks.publishResults, { sessionToken: t, potluckId: potluck.id });
 }
 
 // ---------- dishes ----------
@@ -164,37 +157,36 @@ export async function publishResults(potluck: any): Promise<void> {
 export async function saveDish(potluckId: string, form: any, existing?: any): Promise<void> {
   const t = await token();
   const values = { ...form };
-  for (const key of ["photo", "recipePhoto"]) {
-    const pending = form[`${key}Data`];
-    if (pending) {
-      values[key] = await uploadImage(potluckId, pending);
-      if (existing?.[key]) deleteImage(existing[key]);
-    } else if (form[key] === null && existing?.[key]) {
-      deleteImage(existing[key]);
+  const uploaded: string[] = [];
+  try {
+    for (const key of ["photo", "recipePhoto"]) {
+      const pending = form[`${key}Data`];
+      if (pending) {
+        values[key] = await uploadImage(potluckId, pending);
+        uploaded.push(values[key]);
+      }
     }
+    const fields = dishFields(values);
+    if (existing) {
+      await convex.mutation(api.dishes.update, { sessionToken: t, dishId: existing.id, form: fields });
+    } else {
+      await convex.mutation(api.dishes.claim, { sessionToken: t, potluckId, form: fields });
+    }
+  } catch (err) {
+    await Promise.all(uploaded.map(discardUpload));
+    throw err;
   }
-
-  const fields = dishFields(values);
-  if (existing) {
-    await convex.mutation(api.dishes.update, {
-      sessionToken: t,
-      dishId: existing.id,
-      form: fields,
-    });
-  } else {
-    await convex.mutation(api.dishes.claim, {
-      sessionToken: t,
-      potluckId,
-      form: fields,
-    });
+  // The server deleted any photo that was replaced or removed.
+  for (const key of ["photo", "recipePhoto"]) {
+    if (existing?.[key] && existing[key] !== values[key]) forgetImage(existing[key]);
   }
 }
 
 export async function deleteDish(potluckId: string, dish: any): Promise<void> {
   const t = await token();
   await convex.mutation(api.dishes.deleteDish, { sessionToken: t, dishId: dish.id });
-  if (dish.photo) await deleteImage(dish.photo);
-  if (dish.recipePhoto) await deleteImage(dish.recipePhoto);
+  forgetImage(dish.photo);
+  forgetImage(dish.recipePhoto);
 }
 
 export async function toggleLike(potluckId: string, dishId: string, _liked: boolean): Promise<boolean> {
@@ -211,22 +203,4 @@ export async function submitRating(potluckId: string, dishId: string, scores: Re
     dishId,
     scores,
   });
-}
-
-/** Every dish from every potluck the user attended (the recipe bank). */
-export async function loadRecipeBank(potlucks: any[]): Promise<any[]> {
-  const lists = await Promise.all(
-    potlucks.map(async (p) => {
-      const dishes = await convex.query(api.dishes.listByPotluck, { potluckId: p.id });
-      return dishes.map((d: any) => ({ ...d, potluck: p }));
-    })
-  );
-  return lists.flat();
-}
-
-// ---------- account ----------
-
-export async function deleteMyData(): Promise<void> {
-  const t = await token();
-  await convex.mutation(api.users.deleteAccount, { sessionToken: t });
 }

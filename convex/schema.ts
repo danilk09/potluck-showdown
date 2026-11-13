@@ -4,17 +4,41 @@ import { v } from "convex/values";
 export default defineSchema({
   users: defineTable({
     email: v.optional(v.string()),
+    // scrypt hash (see convex/auth.ts). Never the plain password.
+    passwordHash: v.optional(v.string()),
+    // Legacy fields from before hashing and the sessions table. Cleared on the
+    // user's next sign-in, or in bulk with `npx convex run auth:hashLegacyPasswords`.
     password: v.optional(v.string()),
+    sessionToken: v.optional(v.string()),
     displayName: v.string(),
     photoURL: v.optional(v.union(v.string(), v.null())),
-    frame: v.optional(v.union(v.any(), v.null())),
+    frame: v.optional(v.union(v.object({ tier: v.string(), potluckId: v.string() }), v.null())),
     isGuest: v.boolean(),
-    sessionToken: v.string(),
     createdAt: v.number(),
     lastSeenAt: v.number(),
+  }).index("by_email", ["email"]),
+
+  // One row per signed-in device. Tokens come from a cryptographic RNG in an
+  // action, expire, and are deleted on sign-out.
+  sessions: defineTable({
+    userId: v.id("users"),
+    token: v.string(),
+    expiresAt: v.number(),
+    createdAt: v.number(),
   })
-    .index("by_sessionToken", ["sessionToken"])
-    .index("by_email", ["email"]),
+    .index("by_token", ["token"])
+    .index("by_userId", ["userId"])
+    .index("by_expiresAt", ["expiresAt"]),
+
+  // Short-lived password reset codes. Only a SHA-256 of the code is stored.
+  passwordResets: defineTable({
+    userId: v.id("users"),
+    codeHash: v.string(),
+    expiresAt: v.number(),
+    attempts: v.number(),
+  })
+    .index("by_userId", ["userId"])
+    .index("by_expiresAt", ["expiresAt"]),
 
   potlucks: defineTable({
     title: v.string(),
@@ -88,7 +112,9 @@ export default defineSchema({
     createdAt: v.number(),
   })
     .index("by_potluck_user", ["potluckId", "userId"])
-    .index("by_potluck_dish", ["potluckId", "dishId"]),
+    .index("by_potluck_dish", ["potluckId", "dishId"])
+    .index("by_dish_user", ["dishId", "userId"])
+    .index("by_userId", ["userId"]),
 
   inviteCodes: defineTable({
     code: v.string(),
@@ -102,5 +128,7 @@ export default defineSchema({
     ownerId: v.string(),
     data: v.string(),
     createdAt: v.number(),
-  }).index("by_potluckId", ["potluckId"]),
+  })
+    .index("by_potluckId", ["potluckId"])
+    .index("by_ownerId", ["ownerId"]),
 });

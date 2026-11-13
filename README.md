@@ -47,22 +47,44 @@ one you can vote in right now, one you can add a dish to, one you already won, a
 | --- | --- |
 | Mobile app | React Native screens in `src/app/` (Expo Router); native share sheet, haptics, camera, and date pickers in `src/lib/platform.ts`, `src/lib/images.ts`, `src/components/DateTimeField.tsx` |
 | Join without downloading | Invite links point to the web build. `src/components/JoinScreen.tsx` lets signed-out visitors join as a **guest** (`signInGuest`). Guests can later save a full account without losing data (`upgradeGuest`) |
-| Secure user sessions | Token-backed authentication via Convex (`convex/users.ts`, `src/hooks/AuthContext.tsx`) |
+| Secure user sessions | Passwords hashed with scrypt; random per-device session tokens that expire and are revoked on sign-out; emailed reset codes (`convex/auth.ts`, `convex/authStore.ts`, `src/hooks/AuthContext.tsx`) |
 | Recipes visible only to attendees | Query access checks in Convex (`convex/dishes.ts`); displayed in `src/app/(app)/(tabs)/recipes.tsx` |
 | Recipe search | `src/app/(app)/(tabs)/recipes.tsx`: search by dish, ingredient, person, or potluck; filter by dietary label; sort |
 | No browsing other profiles | Convex query returns public profile by id, no listing of all user accounts |
 | Flex your wins | Gold/silver/bronze/host **profile frames** shown on every avatar. Profiles only equip a frame backed by a finished potluck |
-| Anonymous ratings | Ballots recorded anonymously with aggregated ratings on dish documents (`convex/voting.ts`) |
+| Anonymous ratings | Ballots are only readable by the voter; dishes store aggregate totals (`convex/voting.ts`) |
+| Rules enforced on the server | Membership, phases, score ranges, guest limits, earned frames and photo limits are checked in every function (`convex/lib/access.ts`), and covered by `convex/backend.test.ts` |
 
 ## Data model (Convex Schema)
 
 Defined in `convex/schema.ts`:
-- `users`: email, password, displayName, photoURL, frame, isGuest, sessionToken, timestamps
+- `users`: email, passwordHash, displayName, photoURL, frame, isGuest, timestamps (legacy `password`/`sessionToken` are cleared on next sign-in)
+- `sessions`: userId, token, expiresAt (one per signed-in device)
+- `passwordResets`: userId, codeHash, expiresAt, attempts
 - `potlucks`: title, theme, description, format, formatDetail, startsAt, location, maxGuests, scoring, dishCategories, memberIds, hostId, inviteCode, status, podium, results
 - `dishes`: potluckId, authorId, categoryId, name, serves, ingredients, steps, allergens, dietary, prepMinutes, calories, photo, recipePhoto, scoreSums, ratingCount, likedBy
 - `ballots`: potluckId, dishId, userId, scores, createdAt
 - `inviteCodes`: code, potluckId, hostId, createdAt
 - `images`: potluckId, ownerId, data, createdAt
+
+### Password reset email
+
+Reset codes are sent with [Resend](https://resend.com). Set these on the Convex deployment (not in `.env`):
+
+```bash
+npx convex env set RESEND_API_KEY re_...
+npx convex env set RESET_EMAIL_FROM "Potluck Showdown <noreply@yourdomain.com>"
+```
+
+Without them, the code is written to the Convex dashboard logs instead, which is fine for local development.
+
+### Upgrading an existing deployment
+
+Accounts created before password hashing still sign in, and are hashed on their first sign-in. To hash all of them at once:
+
+```bash
+npx convex run auth:hashLegacyPasswords
+```
 
 ## Tests & Quality
 
