@@ -2,6 +2,17 @@ import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { Id } from "./_generated/dataModel";
 
+function cleanAiScores(raw: unknown): Record<string, number> | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const out: Record<string, number> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    const n = Number(value);
+    if (!key || !Number.isFinite(n)) continue;
+    out[key] = Math.max(0, Math.min(100, Math.round(n)));
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
 async function getUserByToken(ctx: any, sessionToken: string) {
   if (!sessionToken) throw new Error("Please sign in first.");
   const user = await ctx.db
@@ -72,6 +83,7 @@ export const claim = mutation({
     }
 
     const now = Date.now();
+    const aiScores = cleanAiScores(args.form.aiScores);
     const dishId = await ctx.db.insert("dishes", {
       potluckId: args.potluckId,
       authorId: user._id,
@@ -88,6 +100,7 @@ export const claim = mutation({
       recipePhoto: args.form.recipePhoto ?? null,
       usedRequired: Boolean(args.form.usedRequired),
       scoreSums: {},
+      ...(aiScores ? { aiScores } : {}),
       ratingCount: 0,
       likedBy: [],
       createdAt: now,
@@ -126,6 +139,10 @@ export const update = mutation({
       usedRequired: args.form.usedRequired !== undefined ? Boolean(args.form.usedRequired) : dish.usedRequired,
       updatedAt: now,
     };
+    if (args.form.aiScores !== undefined) {
+      const aiScores = cleanAiScores(args.form.aiScores);
+      if (aiScores) patch.aiScores = { ...(dish.aiScores ?? {}), ...aiScores };
+    }
 
     await ctx.db.patch(dish._id, patch);
     return dish._id;

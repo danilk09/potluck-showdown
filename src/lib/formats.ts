@@ -51,7 +51,7 @@ export function formatInfo(key?: string | null): FormatInfo {
 
 export const DEFAULT_SCORING = [
   { id: "c0", name: "Deliciousness", description: "Flavor, taste, and how much you’d want another bite.", weight: 60 },
-  { id: "c1", name: "Healthiness", description: "Whole ingredients, balance, and nutrition.", weight: 40 },
+  { id: "c1", name: "Healthiness", description: "Whole ingredients, balance, and nutrition.", weight: 40, mode: "manual" },
 ];
 
 export const SCORING_SUGGESTIONS = [

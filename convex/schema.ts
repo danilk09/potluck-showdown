@@ -33,6 +33,7 @@ export default defineSchema({
         name: v.string(),
         description: v.optional(v.string()),
         weight: v.number(),
+        mode: v.optional(v.union(v.literal("manual"), v.literal("ai"))),
       })
     ),
     categoryIds: v.array(v.string()),
@@ -72,6 +73,7 @@ export default defineSchema({
     recipePhoto: v.optional(v.union(v.string(), v.null())),
     usedRequired: v.boolean(),
     scoreSums: v.any(),
+    aiScores: v.optional(v.any()),
     ratingCount: v.number(),
     likedBy: v.array(v.string()),
     createdAt: v.number(),

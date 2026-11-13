@@ -158,7 +158,7 @@ function Preview({ potluck, onJoin, busy }: { potluck: any; onJoin: () => void; 
                   </Text>
                 </Row>
                 <Text style={[type.small, type.muted]} numberOfLines={1}>
-                  {c.description}
+                  {c.mode === "ai" ? "AI calculated" : c.description}
                 </Text>
               </View>
             ))}
