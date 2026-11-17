@@ -4,6 +4,7 @@ import { dishFields, potluckFields } from "./builders";
 import { IMAGE_REF_PREFIX, isImageRef } from "../lib/images";
 import { podiumFrom, rankDishes, resultsSummary } from "../lib/scoring";
 import { normalizeInviteCode } from "../lib/inviteCode";
+import type { Id } from "../../convex/_generated/dataModel";
 
 async function token(): Promise<string> {
   const t = await getStoredToken();
@@ -12,6 +13,7 @@ async function token(): Promise<string> {
 }
 
 export function friendlyError(err: any): string {
+  if (typeof err?.data === "string") return err.data;
   const message = err?.message || String(err);
   if (message.includes("permission-denied") || message.includes("Unauthorized")) {
     return "You don’t have permission to do that right now.";
@@ -161,7 +163,7 @@ export async function publishResults(potluck: any): Promise<void> {
 
 // ---------- dishes ----------
 
-export async function saveDish(potluckId: string, form: any, existing?: any): Promise<void> {
+export async function saveDish(potluckId: string, form: any, existing?: any, scoreHealth = false): Promise<void> {
   const t = await token();
   const values = { ...form };
   for (const key of ["photo", "recipePhoto"]) {
@@ -175,7 +177,14 @@ export async function saveDish(potluckId: string, form: any, existing?: any): Pr
   }
 
   const fields = dishFields(values);
-  if (existing) {
+  if (scoreHealth) {
+    await convex.action(api.dishHealth.calculateAndSave, {
+      sessionToken: t,
+      potluckId: potluckId as Id<"potlucks">,
+      ...(existing ? { dishId: existing.id } : {}),
+      form: fields,
+    });
+  } else if (existing) {
     await convex.mutation(api.dishes.update, {
       sessionToken: t,
       dishId: existing.id,
@@ -188,6 +197,14 @@ export async function saveDish(potluckId: string, form: any, existing?: any): Pr
       form: fields,
     });
   }
+}
+
+export async function recalculateDishHealth(potluckId: string, dishId: string): Promise<void> {
+  await convex.action(api.dishHealth.calculateAndSave, {
+    sessionToken: await token(),
+    potluckId: potluckId as Id<"potlucks">,
+    dishId: dishId as Id<"dishes">,
+  });
 }
 
 export async function deleteDish(potluckId: string, dish: any): Promise<void> {
