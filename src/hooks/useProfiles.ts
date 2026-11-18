@@ -2,18 +2,7 @@ import { useMemo } from "react";
 import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { useAuth } from "./AuthContext";
-
-const cache = new Map<string, any>();
-const listeners = new Set<() => void>();
-
-function emit() {
-  listeners.forEach((l) => l());
-}
-
-export function primeProfile(uid: string, data: any) {
-  cache.set(uid, data);
-  emit();
-}
+import { profileCache as cache } from "./profileCache";
 
 /** Returns a lookup `(uid) => profile | null | undefined` and loads missing ones. */
 export function useProfiles(uids?: (string | null | undefined)[]) {

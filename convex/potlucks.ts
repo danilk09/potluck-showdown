@@ -6,6 +6,8 @@ import {
   requireHost, requireOwnImage, requirePotluck, requireUser, validatePotluckForm,
 } from "./lib/access";
 import { deletePotluckCascade } from "./lib/cascade";
+import { setMembers, syncMemberships } from "./lib/members";
+import { internalMutation } from "./_generated/server";
 import { podiumFrom, rankDishes, resultsSummary } from "../src/lib/scoring";
 
 const withId = (p: Doc<"potlucks">) => ({ id: p._id, ...p });
@@ -78,6 +80,7 @@ export const create = mutation({
       updatedAt: now,
     });
     await ctx.db.insert("inviteCodes", { code, potluckId, hostId: user._id, createdAt: now });
+    await syncMemberships(ctx, potluckId, [user._id]);
     return potluckId;
   },
 });
@@ -120,7 +123,7 @@ export const join = mutation({
     if (isMember(potluck, user._id)) return { success: true };
     if (potluck.status === "closed") fail("This showdown has already ended.");
     if (potluck.maxGuests > 0 && potluck.memberIds.length >= potluck.maxGuests) fail("This potluck is full.");
-    await ctx.db.patch(potluck._id, { memberIds: [...potluck.memberIds, user._id], updatedAt: Date.now() });
+    await setMembers(ctx, potluck, [...potluck.memberIds, user._id]);
     return { success: true };
   },
 });
@@ -145,10 +148,7 @@ export const leave = mutation({
         await ctx.db.delete(d._id);
       }
     }
-    await ctx.db.patch(potluck._id, {
-      memberIds: potluck.memberIds.filter((id) => id !== user._id),
-      updatedAt: Date.now(),
-    });
+    await setMembers(ctx, potluck, potluck.memberIds.filter((id) => id !== user._id));
   },
 });
 
@@ -160,10 +160,7 @@ export const removeGuest = mutation({
     requireHost(potluck, user);
     if (potluck.status === "closed") fail("Results are final, so the guest list can’t change.");
     if (args.guestId === potluck.hostId) fail("The host can’t be removed.");
-    await ctx.db.patch(potluck._id, {
-      memberIds: potluck.memberIds.filter((id) => id !== args.guestId),
-      updatedAt: Date.now(),
-    });
+    await setMembers(ctx, potluck, potluck.memberIds.filter((id) => id !== args.guestId));
   },
 });
 
@@ -218,5 +215,15 @@ export const publishResults = mutation({
       results: { ...resultsSummary(ranked, potluck.memberIds.length), publishedAt: now },
       updatedAt: now,
     });
+  },
+});
+
+/** One-off after deploying the memberships table: `npx convex run potlucks:backfillMemberships` */
+export const backfillMemberships = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const potlucks = await ctx.db.query("potlucks").collect();
+    for (const p of potlucks) await syncMemberships(ctx, p._id, p.memberIds);
+    return { potlucks: potlucks.length };
   },
 });

@@ -45,6 +45,7 @@ export function potluckFields(form: any) {
         needed: Math.max(1, parseInt(c.needed, 10) || 1),
       })),
     coverImage: form.coverImage ?? null,
+    prizes: [0, 1, 2].map((i) => (form.prizes?.[i] ?? "").trim()),
     updatedAt: Date.now(),
   };
 }

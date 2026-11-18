@@ -27,6 +27,7 @@ export const currentUser = query({
       ...publicProfile(user),
       isAnonymous: user.isGuest,
       createdAt: user.createdAt,
+      feedbackPromptedIds: user.feedbackPromptedIds ?? [],
     };
   },
 });
@@ -39,8 +40,10 @@ export const getProfiles = query({
     if (!(await getSessionUser(ctx, args.sessionToken))) return results;
     for (const uid of args.userIds.slice(0, 200)) {
       const id = ctx.db.normalizeId("users", uid);
-      const user = id ? await ctx.db.get(id) : null;
-      if (user) results[uid] = publicProfile(user);
+      if (!id) continue;
+      const user = await ctx.db.get(id);
+      // Dishes from deleted accounts stay in finished potlucks; show who made them as "Deleted user".
+      results[uid] = user ? publicProfile(user) : { displayName: "Deleted user", photoURL: null, frame: null, isGuest: false };
     }
     return results;
   },

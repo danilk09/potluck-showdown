@@ -60,7 +60,7 @@ function DishCard({ dish, potluck, phase, rated, onLike }: { dish: any; potluck:
           {phase === 'closed' ? <Stars value={dish.overall} />
             : mine ? <Chip tone="plain">Your dish</Chip>
               : phase === 'voting' ? (rated
-                ? <Chip tone="green" icon="checkmark">Rated</Chip>
+                ? <Chip tone="green" icon="checkmark" onPress={() => router.push(`${detail}/rate` as any)}>Rated · Change</Chip>
                 : <Button size="sm" variant="soft" icon="star" title="Rate Dish" style={{ borderRadius: 999 }} onPress={() => router.push(`${detail}/rate` as any)} />)
                 : null}
         </Row>

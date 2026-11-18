@@ -49,7 +49,8 @@ export default function RateDish() {
   const { ratings, loading: ratingsLoading } = useMyRatings(pid, isMember);
   const dish = dishes.find((d: any) => d.id === did);
   const author = useProfiles([dish?.authorId])(dish?.authorId);
-  const [scores, setScores] = useState<Record<string, number>>({});
+  // Changes the person has made on this screen; anything unchanged falls back to their earlier vote.
+  const [edits, setEdits] = useState<Record<string, number>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -58,9 +59,10 @@ export default function RateDish() {
 
   const phase = phaseOf(potluck, now);
   if (dish.authorId === uid) return <Notice pid={pid} emoji="🙈" title="That’s your dish!">You can’t rate your own dish.</Notice>;
-  if (ratings.has(did)) return <Notice pid={pid} emoji="✅" title="Already rated">Votes are final. Thanks for judging!</Notice>;
   if (phase !== 'voting') return <Notice pid={pid} emoji="⏳" title={phase === 'open' ? 'Voting hasn’t opened yet' : 'Voting is closed'} />;
 
+  const previous = ratings.get(did);
+  const scores: Record<string, number> = { ...previous?.scores, ...edits };
   const left = dishes.filter((d: any) => d.authorId !== uid && !ratings.has(d.id)).length;
   const closes = toMillis(potluck.votingClosesAt);
   const manualScoring = potluck.scoring.filter((c: any) => c.mode !== 'ai');
@@ -75,7 +77,7 @@ export default function RateDish() {
     try {
       await submitRating(pid, did, scores);
       tapFeedback(ImpactStyle.Medium);
-      toast('Rating submitted 🏆');
+      toast(previous ? 'Vote updated' : 'Rating submitted 🏆');
       // Go straight to the next unrated dish, if there is one.
       const nextDish = dishes.find((d: any) => d.authorId !== uid && !ratings.has(d.id) && d.id !== did);
       if (nextDish) router.replace(`/potlucks/${pid}/dishes/${nextDish.id}/rate` as any);
@@ -88,7 +90,7 @@ export default function RateDish() {
 
   return (
     <Screen footer={manualScoring.length === 0 ? undefined : (
-      <Button size="lg" icon="trophy-outline" title={busy ? 'Submitting…' : 'Submit Rating'} disabled={!complete} loading={busy} onPress={submit} />
+      <Button size="lg" icon="trophy-outline" title={busy ? 'Submitting…' : previous ? 'Update Rating' : 'Submit Rating'} disabled={!complete} loading={busy} onPress={submit} />
     )}>
       <PageHeader title="Rate this dish" actions={<Avatar uid={uid} profile={profile} size={40} />} />
 
@@ -133,17 +135,22 @@ export default function RateDish() {
               <Chip tone={scores[c.id] ? 'green' : 'peach'}>{`${scores[c.id] ?? 0} / 5`}</Chip>
             </Row>
             <Text style={[type.small, type.muted, { marginTop: 2, marginBottom: 10 }]}>{PROMPTS[c.name] ?? c.description}</Text>
-            <StarRating label={c.name} value={scores[c.id] ?? 0} onChange={(v) => setScores((sc) => ({ ...sc, [c.id]: v }))} />
+            <StarRating label={c.name} value={scores[c.id] ?? 0} onChange={(v) => setEdits((sc) => ({ ...sc, [c.id]: v }))} />
             {scores[c.id] ? <Text style={[type.small, { color: colors.mint, fontWeight: '600', marginTop: 8 }]}>✓ {scores[c.id]} of 5 selected</Text> : null}
           </Card>
         ))}
       </Stack>
       )}
 
+      {previous && (
+        <Tile tone="mint" style={{ paddingVertical: 10, paddingHorizontal: 14, marginBottom: 12 }}>
+          <Text style={[type.small, { color: colors.mintDark }]}>You already rated this dish. Change any score and update your vote while voting is open.</Text>
+        </Tile>
+      )}
       {error ? <Banner style={{ marginBottom: 12 }}>{error}</Banner> : null}
       {manualScoring.length > 0 && (complete
         ? <Tile tone="mint" style={{ paddingVertical: 10, paddingHorizontal: 14 }}><Text style={[type.small, { color: colors.mintDark }]}>✓ Ready to submit. All ratings are complete.</Text></Tile>
-        : <Text style={[type.small, type.muted]}>Rate {manualScoring.length === 1 ? manualScoring[0].name : `all ${manualScoring.length} guest categories`} to submit. Votes are final.</Text>)}
+        : <Text style={[type.small, type.muted]}>Rate {manualScoring.length === 1 ? manualScoring[0].name : `all ${manualScoring.length} guest categories`} to submit. You can change your vote until voting closes.</Text>)}
     </Screen>
   );
 }

@@ -15,6 +15,7 @@ import {
   Button, Card, Chip, EmptyState, FsImage, HeroCard, Icon, IconButton, LoadingScreen, OptionSheet, PageHeader, Row, Screen, Stack, Tile,
   useConfirm, useToast,
 } from '../../../../components/ui';
+import PrizeList from '../../../../components/PrizeList';
 import { colors, type } from '../../../../theme';
 
 const CAT_STYLES = [
@@ -212,6 +213,7 @@ export default function EventDetail() {
       </HeroCard>
 
       <PhasePanel potluck={potluck} phase={phase} isHost={isHost} dishes={dishes} rateableCount={othersDishes.length} ratedCount={ratedCount} now={now} onAction={onAction} busy={busy} />
+      <PrizeList prizes={potluck.prizes} style={{ marginBottom: 16 }} />
 
       {(potluck.formatDetail || potluck.description) ? (
         <Card style={{ padding: 14, marginBottom: 16, gap: 4 }}>

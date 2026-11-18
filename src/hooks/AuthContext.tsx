@@ -2,7 +2,7 @@ import React, { createContext, useContext, useEffect, useMemo, useState } from "
 import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { convex, getStoredToken, setStoredToken } from "../convex";
-import { primeProfile } from "./useProfiles";
+import { primeProfile } from "./profileCache";
 
 export interface User {
   uid: string;
@@ -13,6 +13,8 @@ export interface User {
   isAnonymous: boolean;
   isGuest: boolean;
   createdAt: number;
+  /** Finished potlucks that have already shown the feedback popup. */
+  feedbackPromptedIds?: string[];
 }
 
 export interface Profile {

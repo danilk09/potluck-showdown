@@ -2,7 +2,8 @@ import { useMemo, useState } from 'react';
 import { ActivityIndicator, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import { authErrorMessage, useAuth } from '../../../hooks/AuthContext';
-import { useMyPotlucks } from '../../../hooks/useFirestore';
+import Constants from 'expo-constants';
+import { useMyPotlucks, useRecipeBank } from '../../../hooks/useFirestore';
 import { friendlyError, updateMyProfile } from '../../../data/api';
 import { FRAMES, FRAME_ORDER, earnedFrames, winCount } from '../../../lib/frames';
 import { compressImage, pickImage } from '../../../lib/images';
@@ -79,7 +80,7 @@ function DeleteAccountDialog({ visible, onClose }: { visible: boolean; onClose: 
       </>
     )}>
       <Stack gap={10}>
-        <Text style={[type.body, type.muted]}>Your profile and sign-in are permanently deleted. Dishes you shared stay in past potlucks as “Former guest.”</Text>
+        <Text style={[type.body, type.muted]}>Your profile and sign-in are permanently deleted. Dishes you shared in finished potlucks stay in other guests’ recipe banks as “Deleted user.” Everything else is removed.</Text>
         {error ? <Banner>{error}</Banner> : null}
         {!isGuest && (
           <Input placeholder="Confirm your password" accessibilityLabel="Password" value={password} onChangeText={setPassword}
@@ -95,6 +96,7 @@ export default function Profile() {
   const toast = useToast();
   const [confirmEl, confirm] = useConfirm();
   const { data: potlucks } = useMyPotlucks();
+  const { data: recipes } = useRecipeBank();
   const [name, setName] = useState<string | null>(null);
   const [busy, setBusy] = useState('');
   const [showDelete, setShowDelete] = useState(false);
@@ -112,7 +114,7 @@ export default function Profile() {
     return map;
   }, [earned]);
   const trophies = earned.filter((f) => f.tier !== 'host');
-  const attended = potlucks.filter((p) => p.status === 'closed').length;
+  const dishesShared = recipes.filter((r) => r.authorId === uid).length;
 
   const run = async (key: string, fn: () => Promise<any>, success?: string) => {
     setBusy(key);
@@ -206,9 +208,9 @@ export default function Profile() {
         )}
         <Row gap={8} style={{ marginTop: 16, alignSelf: 'stretch' }}>
           {[
-            ['Showdowns', attended],
+            ['Potlucks', potlucks.length],
+            ['Dishes shared', dishesShared],
             ['Wins', winCount(uid, potlucks)],
-            ['Podiums', trophies.length],
           ].map(([label, value]) => (
             <Tile key={label} tone="peach" style={{ flex: 1, paddingVertical: 10, alignItems: 'center' }}>
               <Text style={[type.h2, { fontSize: 22 }]}>{value}</Text>
@@ -219,6 +221,16 @@ export default function Profile() {
       </Card>
 
       {isGuest && <UpgradeGuest />}
+
+      <Text style={[type.h3, { marginBottom: 8 }]}>Your account</Text>
+      <Card style={{ marginBottom: 24, overflow: 'hidden' }}>
+        <ListRow icon="calendar-outline" label="My potlucks" sub="Events you’ve hosted and joined" onPress={() => router.push('/events')} last />
+      </Card>
+
+      <Text style={[type.h3, { marginBottom: 8 }]}>Help & feedback</Text>
+      <Card style={{ marginBottom: 24, overflow: 'hidden' }}>
+        <ListRow icon="chatbubble-outline" iconColor={colors.coral} label="Give feedback" sub="Help make Potluck Showdown better" onPress={() => router.push('/feedback' as any)} last />
+      </Card>
 
       <Text style={[type.h3, { marginBottom: 4 }]}>Profile frame</Text>
       <Text style={[type.small, type.muted, { marginBottom: 10 }]}>
@@ -278,6 +290,9 @@ export default function Profile() {
       </Card>
       <Text style={[type.small, type.muted, { textAlign: 'center' }]}>
         Passwords and accounts are stored securely. Potluck Showdown never sees plain passwords.
+      </Text>
+      <Text style={[type.small, type.muted, { textAlign: 'center', marginTop: 8 }]}>
+        Potluck Showdown · Version {Constants.expoConfig?.version ?? '1.0'}
       </Text>
     </Screen>
   );

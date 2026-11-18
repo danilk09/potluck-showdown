@@ -10,6 +10,7 @@ import GetAppBanner from '../../../components/GetAppBanner';
 import { Button, Dialog, EmptyState, Icon, Loading, Row, Screen, SectionTitle, Stack, Tile } from '../../../components/ui';
 import { phaseOf } from '../../../lib/phase';
 import { toMillis } from '../../../lib/scoring';
+import FeedbackPrompt from '../../../components/FeedbackPrompt';
 import { colors, type } from '../../../theme';
 
 const TIPS = [
@@ -30,6 +31,8 @@ export default function Home() {
   const now = useNow();
   const { data: potlucks, loading } = useMyPotlucks();
   const [guideStep, setGuideStep] = useState(-1);
+  // Hides the popup right away, before the server's record of it comes back.
+  const [feedbackHandled, setFeedbackHandled] = useState<string[]>([]);
 
   const uid = user?.uid || '';
 
@@ -53,9 +56,17 @@ export default function Home() {
   // "Upcoming" = not finished and not more than a day in the past.
   const upcoming = potlucks.filter((p) => p.status !== 'closed' && toMillis(p.startsAt) > now - 86_400_000);
   const tip = TIPS[new Date(now).getDate() % TIPS.length];
+  // Finished potlucks you attended that haven't asked how the app went yet.
+  const prompted = user?.feedbackPromptedIds ?? [];
+  const feedbackFor = potlucks
+    .filter((p) => p.status === 'closed' && !prompted.includes(p.id) && !feedbackHandled.includes(p.id))
+    .map((p) => p.id);
 
   return (
     <Screen inTabs>
+      {guideStep < 0 && feedbackFor.length > 0 && (
+        <FeedbackPrompt potluckIds={feedbackFor} onDone={() => setFeedbackHandled((h) => [...h, ...feedbackFor])} />
+      )}
       <Dialog visible={guideStep >= 0} title={GUIDE[guideStep]?.title} onClose={finishGuide}
         footer={<>
           <Button title="Skip" variant="linkMuted" onPress={finishGuide} />

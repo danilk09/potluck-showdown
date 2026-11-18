@@ -243,7 +243,7 @@ describe("potluck rules", () => {
     await expect(t.mutation(api.potlucks.join, { sessionToken: other.token, potluckId: small })).rejects.toThrow(/ended/);
   });
 
-  test("votes: members only, while live, valid scores, not your own dish, once each", async () => {
+  test("votes: members only, while live, valid scores, not your own dish, one per dish but changeable", async () => {
     const { t, host, guest, outsider, potluckId } = await setup();
     const dishId = await t.mutation(api.dishes.claim, { sessionToken: host.token, potluckId, form: dishForm() });
     const vote = (token: string, scores: Record<string, number>) =>
@@ -258,10 +258,14 @@ describe("potluck rules", () => {
     await expect(vote(guest.token, { c0: 5 })).rejects.toThrow(/every category/);
     await expect(vote(guest.token, { c0: 5, c1: 5, c2: 5 })).rejects.toThrow(/every category/);
     await vote(guest.token, { c0: 5, c1: 3 });
-    await expect(vote(guest.token, { c0: 5, c1: 3 })).rejects.toThrow(/already rated/);
+    // Voting again replaces the earlier ballot instead of counting twice.
+    await vote(guest.token, { c0: 2, c1: 4 });
 
     const dish = await t.query(api.dishes.get, { sessionToken: guest.token, dishId });
-    expect(dish).toMatchObject({ ratingCount: 1, scoreSums: { c0: 5, c1: 3 } });
+    expect(dish).toMatchObject({ ratingCount: 1, scoreSums: { c0: 2, c1: 4 } });
+    expect(await t.query(api.voting.listMyRatings, { sessionToken: guest.token, potluckId })).toMatchObject([
+      { dishId, scores: { c0: 2, c1: 4 } },
+    ]);
   });
 
   test("scheduled voting times are enforced", async () => {
@@ -405,5 +409,125 @@ describe("cleanup", () => {
       invites: await ctx.db.query("inviteCodes").collect(),
     }));
     expect(left).toEqual({ potlucks: [], invites: [] });
+  });
+});
+
+describe("changes: memberships, prizes, weights, feedback, deleted accounts", () => {
+  test("my potlucks comes from the memberships index and follows join/leave/remove", async () => {
+    const { t, host, guest, outsider, potluckId } = await setup();
+    const ids = async (token: string) => (await t.query(api.potlucks.listMyPotlucks, { sessionToken: token })).map((p) => p.id);
+    expect(await ids(host.token)).toEqual([potluckId]);
+    expect(await ids(guest.token)).toEqual([potluckId]);
+    expect(await ids(outsider.token)).toEqual([]);
+
+    await t.mutation(api.potlucks.leave, { sessionToken: guest.token, potluckId });
+    expect(await ids(guest.token)).toEqual([]);
+    await t.mutation(api.potlucks.join, { sessionToken: outsider.token, potluckId });
+    await t.mutation(api.potlucks.removeGuest, { sessionToken: host.token, potluckId, guestId: outsider.id });
+    expect(await ids(outsider.token)).toEqual([]);
+
+    await t.mutation(api.potlucks.deletePotluck, { sessionToken: host.token, potluckId });
+    expect(await t.run((ctx) => ctx.db.query("memberships").collect())).toEqual([]);
+  });
+
+  test("backfill builds memberships for potlucks created before the index", async () => {
+    const { t, host, potluckId } = await setup();
+    await t.run(async (ctx) => {
+      for (const m of await ctx.db.query("memberships").collect()) await ctx.db.delete(m._id);
+    });
+    expect(await t.query(api.potlucks.listMyPotlucks, { sessionToken: host.token })).toEqual([]);
+    await t.mutation(internal.potlucks.backfillMemberships, {});
+    expect((await t.query(api.potlucks.listMyPotlucks, { sessionToken: host.token })).map((p) => p.id)).toEqual([potluckId]);
+  });
+
+  test("scoring weights must total exactly 100%", async () => {
+    const { t, host } = await setup();
+    const scoring = (a: number, b: number) => [
+      { id: "c0", name: "Taste", weight: a },
+      { id: "c1", name: "Looks", weight: b },
+    ];
+    for (const [a, b] of [[70, 40], [30, 30]]) {
+      await expect(
+        t.mutation(api.potlucks.create, { sessionToken: host.token, form: potluckForm({ inviteCode: `W-${a}${b}`, scoring: scoring(a, b) }) }),
+      ).rejects.toThrow(/add up to 100%/);
+    }
+  });
+
+  test("hosts can offer prizes for 1st, 2nd and 3rd", async () => {
+    const { t, host } = await setup();
+    const potluckId = await t.mutation(api.potlucks.create, {
+      sessionToken: host.token,
+      form: potluckForm({ inviteCode: "PRIZE-1234", prizes: ["$20 gift card", "", "Homemade jam"] }),
+    });
+    const p = await t.query(api.potlucks.get, { sessionToken: host.token, potluckId });
+    expect(p!.prizes).toEqual(["$20 gift card", "", "Homemade jam"]);
+    await expect(
+      t.mutation(api.potlucks.update, { sessionToken: host.token, potluckId, form: { prizes: ["x".repeat(81)] } }),
+    ).rejects.toThrow(/too long/);
+  });
+
+  test("AI-scored categories aren't part of the ballot", async () => {
+    const { t, host, guest } = await setup();
+    const potluckId = await t.mutation(api.potlucks.create, {
+      sessionToken: host.token,
+      form: potluckForm({
+        inviteCode: "AIMODE-123",
+        scoring: [
+          { id: "c0", name: "Taste", weight: 60 },
+          { id: "c1", name: "Healthiness", weight: 40, mode: "ai" },
+        ],
+      }),
+    });
+    await t.mutation(api.potlucks.join, { sessionToken: guest.token, potluckId });
+    const dishId = await t.mutation(api.dishes.claim, { sessionToken: host.token, potluckId, form: dishForm({ aiScores: { c1: 80 } }) });
+    await t.mutation(api.potlucks.openVoting, { sessionToken: host.token, potluckId });
+    await t.mutation(api.voting.submitBallot, { sessionToken: guest.token, potluckId, dishId, scores: { c0: 4 } });
+    const dish = await t.query(api.dishes.get, { sessionToken: guest.token, dishId });
+    expect(dish).toMatchObject({ ratingCount: 1, aiScores: { c1: 80 }, name: "Chili" });
+  });
+
+  test("feedback is saved, and answering or dismissing the popup stops it for that potluck", async () => {
+    const { t, guest, potluckId } = await setup();
+    await expect(
+      t.mutation(api.feedback.submit, { sessionToken: guest.token, source: "form", rating: 6 }),
+    ).rejects.toThrow(/1 to 5/);
+    await t.mutation(api.feedback.submit, {
+      sessionToken: guest.token,
+      source: "form",
+      rating: 4,
+      features: { creating: "na", joining: "easy", addingDish: "easy", voting: "okay" },
+      comment: "Joining was easy!",
+    });
+    await t.mutation(api.feedback.submit, {
+      sessionToken: guest.token,
+      source: "popup",
+      potluckId,
+      rating: 5,
+      reasons: ["Easy to use", "not a real reason"],
+    });
+    const rows = await t.run((ctx) => ctx.db.query("feedback").collect());
+    expect(rows).toHaveLength(2);
+    expect(rows[1]).toMatchObject({ source: "popup", rating: 5, reasons: ["Easy to use"] });
+    expect(await t.query(api.users.currentUser, { sessionToken: guest.token })).toMatchObject({ feedbackPromptedIds: [potluckId] });
+
+    await t.mutation(api.feedback.dismissPrompt, { sessionToken: guest.token, potluckIds: ["other", potluckId] });
+    expect(await t.query(api.users.currentUser, { sessionToken: guest.token })).toMatchObject({
+      feedbackPromptedIds: [potluckId, "other"],
+    });
+  });
+
+  test("deleting an account keeps dishes in finished potlucks for everyone else's recipe bank", async () => {
+    const { t, host, guest, potluckId } = await setup();
+    const ref = await t.mutation(api.images.upload, { sessionToken: guest.token, potluckId, data: PNG });
+    const dishId = await t.mutation(api.dishes.claim, { sessionToken: guest.token, potluckId, form: dishForm({ photo: ref }) });
+    await t.mutation(api.potlucks.publishResults, { sessionToken: host.token, potluckId });
+
+    await t.action(api.auth.deleteAccount, { sessionToken: guest.token, password: "password123" });
+
+    const bank = await t.query(api.dishes.recipeBank, { sessionToken: host.token });
+    expect(bank.map((d) => d.id)).toEqual([dishId]);
+    expect(await t.query(api.images.get, { sessionToken: host.token, imageId: ref.split("/")[1] })).toBe(PNG);
+    const author = await t.query(api.users.getProfiles, { sessionToken: host.token, userIds: [guest.id] });
+    expect(author[guest.id]).toMatchObject({ displayName: "Deleted user" });
   });
 });

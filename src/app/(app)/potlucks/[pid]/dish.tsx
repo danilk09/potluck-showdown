@@ -76,6 +76,7 @@ function DishEditor({ potluck, dishes, existing }: { potluck: any; dishes: any[]
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [extraAllergen, setExtraAllergen] = useState('');
+  const [extraDietary, setExtraDietary] = useState('');
   const [calc, setCalc] = useState<{ saving: boolean } | null>(null);
 
   const uid = user?.uid || '';
@@ -138,6 +139,12 @@ function DishEditor({ potluck, dishes, existing }: { potluck: any; dishes: any[]
     const a = extraAllergen.trim();
     if (a && !form.allergens.includes(a)) set('allergens', [...form.allergens, a]);
     setExtraAllergen('');
+  };
+
+  const addDietary = () => {
+    const d = extraDietary.trim();
+    if (d && !form.dietary.includes(d)) set('dietary', [...form.dietary, d]);
+    setExtraDietary('');
   };
 
   return (
@@ -229,7 +236,12 @@ function DishEditor({ potluck, dishes, existing }: { potluck: any; dishes: any[]
         </View>
         <View>
           <Label>Dietary labels</Label>
-          <ChipToggleGroup options={DIETARY_LABELS} value={form.dietary} onChange={(v) => set('dietary', v)} />
+          <ChipToggleGroup options={[...new Set([...DIETARY_LABELS, ...form.dietary])]} value={form.dietary} onChange={(v) => set('dietary', v)} />
+          <Row gap={8} style={{ marginTop: 8, maxWidth: 360 }}>
+            <Input style={{ flex: 1, paddingVertical: 8 }} placeholder="Other dietary label" accessibilityLabel="Other dietary label" value={extraDietary}
+              onChangeText={setExtraDietary} returnKeyType="done" onSubmitEditing={addDietary} blurOnSubmit={false} />
+            <Button size="sm" variant="outline" title="Add" onPress={addDietary} />
+          </Row>
         </View>
 
         <Card style={{ padding: 14 }}>

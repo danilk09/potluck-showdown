@@ -16,6 +16,8 @@ export default defineSchema({
     isGuest: v.boolean(),
     createdAt: v.number(),
     lastSeenAt: v.number(),
+    // Finished potlucks the user has already been asked to rate the app for.
+    feedbackPromptedIds: v.optional(v.array(v.string())),
   }).index("by_email", ["email"]),
 
   // One row per signed-in device. Tokens come from a cryptographic RNG in an
@@ -69,6 +71,8 @@ export default defineSchema({
       })
     ),
     coverImage: v.optional(v.union(v.string(), v.null())),
+    // Optional physical prizes the host provides, for 1st/2nd/3rd place ("" = none).
+    prizes: v.optional(v.array(v.string())),
     inviteCode: v.string(),
     hostId: v.string(),
     memberIds: v.array(v.string()),
@@ -80,6 +84,15 @@ export default defineSchema({
   })
     .index("by_inviteCode", ["inviteCode"])
     .index("by_hostId", ["hostId"]),
+
+  // Mirror of potlucks.memberIds, so "my potlucks" is an index lookup instead
+  // of a scan. Kept in sync by convex/lib/members.ts.
+  memberships: defineTable({
+    userId: v.string(),
+    potluckId: v.id("potlucks"),
+  })
+    .index("by_userId", ["userId"])
+    .index("by_potluck_user", ["potluckId", "userId"]),
 
   dishes: defineTable({
     potluckId: v.string(),
@@ -133,4 +146,24 @@ export default defineSchema({
   })
     .index("by_potluckId", ["potluckId"])
     .index("by_ownerId", ["ownerId"]),
+
+  // App feedback: the quick popup after a finished potluck, or the full form from Profile.
+  feedback: defineTable({
+    userId: v.id("users"),
+    source: v.union(v.literal("popup"), v.literal("form")),
+    potluckId: v.optional(v.string()),
+    rating: v.number(), // 1–5, required
+    reasons: v.optional(v.array(v.string())),
+    // Feature questions from the full form; "na" = not applicable.
+    features: v.optional(
+      v.object({
+        creating: v.optional(v.string()),
+        joining: v.optional(v.string()),
+        addingDish: v.optional(v.string()),
+        voting: v.optional(v.string()),
+      }),
+    ),
+    comment: v.optional(v.string()),
+    createdAt: v.number(),
+  }).index("by_userId", ["userId"]),
 });

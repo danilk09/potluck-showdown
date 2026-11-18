@@ -62,12 +62,14 @@ export function requireHost(potluck: Doc<"potlucks">, user: Doc<"users">) {
   if (potluck.hostId !== user._id) fail("Only the host can do that.");
 }
 
-/** Potlucks the user belongs to. */
+/** Potlucks the user hosts or has joined, found through the memberships index. */
 export async function potlucksForUser(ctx: ReadCtx, userId: Id<"users">): Promise<Doc<"potlucks">[]> {
-  // memberIds is an array, which Convex can't index, so this scans potlucks.
-  // Move membership into its own indexed table if the app grows large.
-  const all = await ctx.db.query("potlucks").collect();
-  return all.filter((p) => p.memberIds.includes(userId));
+  const rows = await ctx.db
+    .query("memberships")
+    .withIndex("by_userId", (q) => q.eq("userId", userId))
+    .collect();
+  const potlucks = await Promise.all(rows.map((r) => ctx.db.get(r.potluckId)));
+  return potlucks.filter((p): p is Doc<"potlucks"> => p !== null && p.memberIds.includes(userId));
 }
 
 // ---------- phases (mirror src/lib/phase.ts) ----------
@@ -135,8 +137,12 @@ export function validatePotluckForm(form: any) {
       name: str(c?.name, "Scoring category name", 1, 40),
       description: optStr(c?.description, "Scoring description", 200),
       weight,
+      ...(c?.mode === "ai" || c?.mode === "manual" ? { mode: c.mode as "ai" | "manual" } : {}),
     };
   });
+
+  const totalWeight = scoring.reduce((sum: number, c: any) => sum + c.weight, 0);
+  if (totalWeight !== 100) fail(`Scoring weights must add up to 100% (currently ${totalWeight}%).`);
 
   if (!Array.isArray(form.dishCategories) || form.dishCategories.length < 1 || form.dishCategories.length > 12) {
     fail("Add between 1 and 12 dish categories.");
@@ -170,7 +176,15 @@ export function validatePotluckForm(form: any) {
     scoring,
     categoryIds: scoring.map((c: any) => c.id),
     dishCategories,
+    prizes: prizeList(form.prizes),
   };
+}
+
+/** Optional prizes for 1st, 2nd and 3rd place ("" = none). */
+function prizeList(value: unknown): string[] {
+  if (value == null) return ["", "", ""];
+  if (!Array.isArray(value) || value.length > 3) fail("Prizes are for 1st, 2nd and 3rd place only.");
+  return [0, 1, 2].map((i) => optStr(value[i], "Prize", 80));
 }
 
 /** Author-controlled dish fields, cleaned and checked against the potluck. */
@@ -200,12 +214,15 @@ export function validateDishForm(form: any, potluck: Doc<"potlucks">) {
   };
 }
 
-/** A ballot must score exactly the potluck's categories, each a whole number 1–5. */
+/**
+ * A ballot must score exactly the potluck's guest-rated categories, each a
+ * whole number 1–5. AI-scored categories are calculated, not voted on.
+ */
 export function validateScores(scores: unknown, potluck: Doc<"potlucks">): Record<string, number> {
   if (!scores || typeof scores !== "object" || Array.isArray(scores)) fail("Missing scores.");
   const entries = Object.entries(scores as Record<string, unknown>);
   const keys = entries.map(([k]) => k).sort();
-  const expected = [...potluck.categoryIds].sort();
+  const expected = potluck.scoring.filter((c) => c.mode !== "ai").map((c) => c.id).sort();
   if (keys.length !== expected.length || keys.some((k, i) => k !== expected[i])) {
     fail("Score every category for this potluck.");
   }

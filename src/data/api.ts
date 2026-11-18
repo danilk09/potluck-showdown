@@ -204,3 +204,22 @@ export async function submitRating(potluckId: string, dishId: string, scores: Re
     scores,
   });
 }
+
+// ---------- app feedback ----------
+
+export async function submitFeedback(feedback: {
+  source: "popup" | "form";
+  rating: number;
+  potluckId?: string;
+  promptedIds?: string[];
+  reasons?: string[];
+  features?: { creating?: string; joining?: string; addingDish?: string; voting?: string };
+  comment?: string;
+}): Promise<void> {
+  await convex.mutation(api.feedback.submit, { sessionToken: await token(), ...feedback });
+}
+
+/** "Not now" on the feedback popup: don't ask again for these finished potlucks. */
+export async function dismissFeedbackPrompt(potluckIds: string[]): Promise<void> {
+  await convex.mutation(api.feedback.dismissPrompt, { sessionToken: await token(), potluckIds });
+}

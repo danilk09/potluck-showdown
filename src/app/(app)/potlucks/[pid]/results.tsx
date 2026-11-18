@@ -111,6 +111,7 @@ export default function Results() {
                   <Avatar uid={d.authorId} profile={lookup(d.authorId)} size={22} medal={false} />
                   <Text style={[type.small, { flexShrink: 1 }]} numberOfLines={1}>by {name(d.authorId)}</Text>
                 </Row>
+                {potluck.prizes?.[i] ? <Text style={[type.small, type.bold]} numberOfLines={2}>🎁 {potluck.prizes[i]}</Text> : null}
               </View>
               <Stars small value={d.overall} />
             </Tile>

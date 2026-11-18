@@ -2,7 +2,8 @@
 // behind in the database.
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
-import { deleteImageRef, potlucksForUser } from "./access";
+import { deleteImageRef, getPotluck, imageIdFromRef, potlucksForUser } from "./access";
+import { setMembers, syncMemberships } from "./members";
 
 /** A dish, its photos, and every ballot cast for it. */
 export async function deleteDishCascade(ctx: MutationCtx, dish: Doc<"dishes">) {
@@ -36,12 +37,14 @@ export async function deletePotluckCascade(ctx: MutationCtx, potluck: Doc<"potlu
     .unique();
   if (invite) await ctx.db.delete(invite._id);
 
+  await syncMemberships(ctx, potluck._id, []);
   await ctx.db.delete(potluck._id);
 }
 
 /**
- * Everything a user owns. Unfinished potlucks they host are cancelled;
- * finished ones keep their published results for the other guests.
+ * Everything a user owns. Unfinished potlucks they host are cancelled.
+ * Finished potlucks keep their results, and the user's dishes and photos in
+ * them stay in other guests' recipe banks (shown as "Deleted user").
  */
 export async function deleteUserCascade(ctx: MutationCtx, userId: Id<"users">) {
   // Their votes. While a potluck is still running, take the scores back out
@@ -80,20 +83,32 @@ export async function deleteUserCascade(ctx: MutationCtx, userId: Id<"users">) {
         await ctx.db.patch(d._id, { likedBy: d.likedBy.filter((id) => id !== userId) });
       }
     }
-    await ctx.db.patch(p._id, { memberIds: p.memberIds.filter((id) => id !== userId) });
+    await setMembers(ctx, p, p.memberIds.filter((id) => id !== userId));
   }
 
+  // Dishes in finished potlucks stay, along with their photos.
+  const keptImages = new Set<string>();
   const dishes = await ctx.db
     .query("dishes")
     .withIndex("by_authorId", (q) => q.eq("authorId", userId))
     .collect();
-  for (const d of dishes) await deleteDishCascade(ctx, d);
+  for (const d of dishes) {
+    const potluck = await getPotluck(ctx, d.potluckId);
+    if (potluck?.status === "closed") {
+      for (const ref of [d.photo, d.recipePhoto]) {
+        const id = imageIdFromRef(ctx, ref);
+        if (id) keptImages.add(id);
+      }
+    } else {
+      await deleteDishCascade(ctx, d);
+    }
+  }
 
   const images = await ctx.db
     .query("images")
     .withIndex("by_ownerId", (q) => q.eq("ownerId", userId))
     .collect();
-  for (const img of images) await ctx.db.delete(img._id);
+  for (const img of images) if (!keptImages.has(img._id)) await ctx.db.delete(img._id);
 
   const sessions = await ctx.db
     .query("sessions")

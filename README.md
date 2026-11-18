@@ -86,6 +86,12 @@ Accounts created before password hashing still sign in, and are hashed on their 
 npx convex run auth:hashLegacyPasswords
 ```
 
+"My potlucks" reads from the `memberships` index. After deploying it, build the index for existing potlucks once:
+
+```bash
+npx convex run potlucks:backfillMemberships
+```
+
 ## Tests & Quality
 
 ```bash

@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { router } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import Slider from "@react-native-community/slider";
 import { useAuth } from "../hooks/AuthContext";
 import { usePotluck } from "../hooks/useFirestore";
 import { createPotluck, friendlyError, updatePotluck } from "../data/api";
@@ -51,13 +52,15 @@ function blankForm() {
     theme: "",
     description: "",
     inviteCode: generateInviteCode(),
-    scoring: DEFAULT_SCORING.map((c) => ({ ...c })),
+    // Sliders start at 0%; the host spreads the 100% across categories.
+    scoring: DEFAULT_SCORING.map((c) => ({ ...c, weight: 0 })),
     dishCategories: categoriesFor("classic"),
     maxGuests: "",
     votingOpensAt: "",
     votingClosesAt: "",
     coverImage: null,
     coverData: null,
+    prizes: ["", "", ""],
   };
 }
 
@@ -96,6 +99,7 @@ function fromPotluck(p: any) {
     votingClosesAt: toInputDateTime(p.votingClosesAt),
     coverImage: p.coverImage ?? null,
     coverData: null,
+    prizes: [0, 1, 2].map((i) => p.prizes?.[i] ?? ""),
   };
 }
 
@@ -210,12 +214,15 @@ function PotluckEditor({ existing, userId }: { existing: any; userId: string }) 
       form.scoring.map((c: any, j: number) => (j === i ? { ...c, ...patch } : c))
     );
   const addScoring = (s?: any) => {
-    const remaining = Math.max(0, 100 - total);
     set("scoring", [
       ...form.scoring,
-      { id: `c${form.scoring.length}`, name: s?.name ?? "", description: s?.description ?? "", weight: remaining },
+      { id: `c${form.scoring.length}`, name: s?.name ?? "", description: s?.description ?? "", weight: 0 },
     ]);
   };
+  // A slider can only use the percentage the other categories haven't taken.
+  const availableFor = (i: number) => 100 - (total - (Number(form.scoring[i].weight) || 0));
+  const setWeight = (i: number, value: number) =>
+    setScoring(i, { weight: Math.max(0, Math.min(availableFor(i), Math.round(value))) });
   const setCategory = (i: number, patch: any) => {
     setCategoriesTouched(true);
     set(
@@ -266,7 +273,8 @@ function PotluckEditor({ existing, userId }: { existing: any; userId: string }) 
     if (!editing && !isValidInviteCode(normalizeInviteCode(form.inviteCode)))
       return "Invite codes use 4–20 letters, numbers, or dashes.";
     if (form.scoring.some((c: any) => !c.name.trim())) return "Every scoring category needs a name.";
-    if (total !== 100) return `Scoring weights must add up to 100% (currently ${total}%).`;
+    if (total < 100) return `Your scoring weights only add up to ${total}%. Move the sliders so they total 100% before continuing.`;
+    if (total > 100) return `Your scoring weights add up to ${total}%. Lower a slider so they total exactly 100%.`;
     return "";
   };
 
@@ -476,6 +484,9 @@ function PotluckEditor({ existing, userId }: { existing: any; userId: string }) 
                 {total}% of 100%
               </Text>
             </Row>
+            {!scoringLocked && total < 100 && (
+              <Text style={[type.small, type.muted, { marginBottom: 6 }]}>{100 - total}% left to assign.</Text>
+            )}
             {scoringLocked && (
               <Banner tone="warning" style={{ marginBottom: 8 }}>
                 Voting has started, so scoring can’t change.
@@ -507,17 +518,7 @@ function PotluckEditor({ existing, userId }: { existing: any; userId: string }) 
                         onChangeText={(v) => setScoring(i, { description: v })}
                       />
                     </View>
-                    <Row gap={4}>
-                      <Input
-                        style={{ width: 58, textAlign: "center", paddingHorizontal: 6 }}
-                        keyboardType="number-pad"
-                        accessibilityLabel="Weight"
-                        value={String(c.weight)}
-                        editable={!scoringLocked}
-                        onChangeText={(v) => setScoring(i, { weight: Math.min(100, Math.max(0, parseInt(v, 10) || 0)) })}
-                      />
-                      <Text style={type.muted}>%</Text>
-                    </Row>
+                    <Text style={[type.body, type.bold, { minWidth: 44, textAlign: "right" }]}>{c.weight}%</Text>
                     {form.scoring.length > 1 && !scoringLocked && (
                       <IconButton
                         name="trash-outline"
@@ -527,6 +528,23 @@ function PotluckEditor({ existing, userId }: { existing: any; userId: string }) 
                       />
                     )}
                   </Row>
+                  <Slider
+                    style={{ marginTop: 6, height: 36 }}
+                    minimumValue={0}
+                    maximumValue={100}
+                    upperLimit={availableFor(i)}
+                    step={1}
+                    value={Number(c.weight) || 0}
+                    disabled={scoringLocked}
+                    onValueChange={(v) => setWeight(i, v)}
+                    minimumTrackTintColor={colors.coral}
+                    maximumTrackTintColor={colors.line}
+                    thumbTintColor={colors.coral}
+                    accessibilityLabel={`${c.name || "Category"} weight`}
+                  />
+                  <Text style={[type.small, type.muted]}>
+                    {scoringLocked ? "" : `Up to ${availableFor(i)}% available for this category`}
+                  </Text>
                   {supportsAiScoring(c.name) && (
                     <View style={{ marginTop: 10 }}>
                       <Text style={[type.small, type.muted, { marginBottom: 6 }]}>How healthiness is scored</Text>
@@ -705,6 +723,25 @@ function PotluckEditor({ existing, userId }: { existing: any; userId: string }) 
             value={form.maxGuests}
             onChangeText={(v: string) => set("maxGuests", v.replace(/\D/g, ""))}
           />
+
+          <View>
+            <Label>Prizes (optional)</Label>
+            <Text style={[type.small, type.muted, { marginBottom: 8 }]}>
+              Offering something for the winners? Add it here. You provide the prize; Potluck Showdown just shows it to guests.
+            </Text>
+            <Stack gap={8}>
+              {["🥇 1st place", "🥈 2nd place", "🥉 3rd place"].map((place, i) => (
+                <Input
+                  key={place}
+                  maxLength={80}
+                  placeholder={`${place} prize, e.g. $20 gift card`}
+                  accessibilityLabel={`${place} prize`}
+                  value={form.prizes?.[i] ?? ""}
+                  onChangeText={(v) => set("prizes", [0, 1, 2].map((j) => (j === i ? v : form.prizes?.[j] ?? "")))}
+                />
+              ))}
+            </Stack>
+          </View>
 
           <View>
             <Label>Cover photo</Label>

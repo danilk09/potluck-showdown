@@ -1,5 +1,6 @@
 import { internalMutation } from "./_generated/server";
 import { v } from "convex/values";
+import { syncMemberships } from "./lib/members";
 
 // Internal: only `npx convex run seedDemo:run` (an admin) can call this. It
 // wipes the database, so it must never be reachable from the app.
@@ -7,7 +8,7 @@ export const defaultSeed = internalMutation({
   args: { passwordHash: v.string() },
   handler: async (ctx, { passwordHash }) => {
     // 1. Wipe all existing collections
-    const collections = ["users", "sessions", "passwordResets", "potlucks", "dishes", "ballots", "inviteCodes", "images"] as const;
+    const collections = ["users", "sessions", "passwordResets", "memberships", "feedback", "potlucks", "dishes", "ballots", "inviteCodes", "images"] as const;
     for (const coll of collections) {
       const records = await ctx.db.query(coll).collect();
       for (const rec of records) {
@@ -441,6 +442,8 @@ export const defaultSeed = internalMutation({
       hostId: leoId,
       createdAt: day(-1),
     });
+
+    for (const p of await ctx.db.query("potlucks").collect()) await syncMemberships(ctx, p._id, p.memberIds);
 
     return {
       success: true,

@@ -18,7 +18,10 @@ export const listMyRatings = query({
   },
 });
 
-/** Records a ballot and adds it to the dish's running totals in one transaction. */
+/**
+ * Records a ballot and adds it to the dish's running totals in one transaction.
+ * Voting again on the same dish replaces the earlier ballot while voting is live.
+ */
 export const submitBallot = mutation({
   args: {
     sessionToken: v.string(),
@@ -41,18 +44,25 @@ export const submitBallot = mutation({
       .query("ballots")
       .withIndex("by_dish_user", (q) => q.eq("dishId", dish._id).eq("userId", user._id))
       .first();
-    if (existing) fail("You have already rated this dish.");
 
-    await ctx.db.insert("ballots", {
-      potluckId: potluck._id,
-      dishId: dish._id,
-      userId: user._id,
-      scores,
-      createdAt: Date.now(),
-    });
     const scoreSums = { ...(dish.scoreSums ?? {}) };
+    if (existing) {
+      // Take the old scores back out before adding the new ones.
+      for (const [id, value] of Object.entries(existing.scores as Record<string, number>)) {
+        scoreSums[id] = (scoreSums[id] ?? 0) - value;
+      }
+      await ctx.db.patch(existing._id, { scores });
+    } else {
+      await ctx.db.insert("ballots", {
+        potluckId: potluck._id,
+        dishId: dish._id,
+        userId: user._id,
+        scores,
+        createdAt: Date.now(),
+      });
+    }
     for (const [id, value] of Object.entries(scores)) scoreSums[id] = (scoreSums[id] ?? 0) + value;
-    await ctx.db.patch(dish._id, { scoreSums, ratingCount: dish.ratingCount + 1 });
-    return { success: true };
+    await ctx.db.patch(dish._id, { scoreSums, ratingCount: dish.ratingCount + (existing ? 0 : 1) });
+    return { success: true, updated: Boolean(existing) };
   },
 });

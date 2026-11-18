@@ -9,6 +9,7 @@ import { formatTime, formatWhen } from "../lib/dates";
 import { PHASE_LABEL, phaseOf } from "../lib/phase";
 import { androidAppUrl, isWeb } from "../lib/platform";
 import { AuthorLine } from "./Avatar";
+import PrizeList from "./PrizeList";
 import {
   Banner,
   Button,
@@ -163,6 +164,7 @@ function Preview({ potluck, onJoin, busy }: { potluck: any; onJoin: () => void; 
               </View>
             ))}
           </Row>
+          <PrizeList prizes={potluck.prizes} />
           <Tile
             tone="lilac"
             style={{
