@@ -5,14 +5,25 @@ import { syncMemberships } from "./lib/members";
 // Internal: only `npx convex run seedDemo:run` (an admin) can call this. It
 // wipes the database, so it must never be reachable from the app.
 export const defaultSeed = internalMutation({
-  args: { passwordHash: v.string() },
-  handler: async (ctx, { passwordHash }) => {
-    // 1. Wipe all existing collections
-    const collections = ["users", "sessions", "passwordResets", "memberships", "feedback", "potlucks", "dishes", "ballots", "inviteCodes", "images"] as const;
-    for (const coll of collections) {
-      const records = await ctx.db.query(coll).collect();
-      for (const rec of records) {
-        await ctx.db.delete(rec._id);
+  args: { passwordHash: v.string(), preserveExisting: v.optional(v.boolean()) },
+  returns: v.object({ success: v.boolean(), message: v.string() }),
+  handler: async (ctx, { passwordHash, preserveExisting }) => {
+    const demoEmails = ["you@example.com", "maya@example.com", "leo@example.com", "priya@example.com"];
+    const demoCodes = ["HARVEST-7K2Q", "SUNSET-4MXR", "BRUNCH-9PLT", "DUMPLING-3QZ"];
+
+    if (preserveExisting) {
+      const [users, potlucks, invites] = await Promise.all([
+        Promise.all(demoEmails.map((email) => ctx.db.query("users").withIndex("by_email", (q) => q.eq("email", email)).first())),
+        Promise.all(demoCodes.map((code) => ctx.db.query("potlucks").withIndex("by_inviteCode", (q) => q.eq("inviteCode", code)).first())),
+        Promise.all(demoCodes.map((code) => ctx.db.query("inviteCodes").withIndex("by_code", (q) => q.eq("code", code)).first())),
+      ]);
+      const matches = [...users, ...potlucks, ...invites];
+      if (matches.every(Boolean)) return { success: true, message: "Demo data already exists." };
+      if (matches.some(Boolean)) throw new Error("A demo email or invite code already exists. Seed skipped to preserve existing data.");
+    } else {
+      const collections = ["users", "sessions", "passwordResets", "memberships", "feedback", "potlucks", "dishes", "ballots", "inviteCodes", "images"] as const;
+      for (const coll of collections) {
+        for await (const rec of ctx.db.query(coll)) await ctx.db.delete(coll, rec._id);
       }
     }
 
@@ -26,7 +37,7 @@ export const defaultSeed = internalMutation({
 
     // 2. Create Users
     const youId = await ctx.db.insert("users", {
-      email: "you@example.com",
+      email: demoEmails[0],
       passwordHash,
       displayName: "Alex Rivera",
       photoURL: null,
@@ -37,7 +48,7 @@ export const defaultSeed = internalMutation({
     });
 
     const mayaId = await ctx.db.insert("users", {
-      email: "maya@example.com",
+      email: demoEmails[1],
       passwordHash,
       displayName: "Maya Chen",
       photoURL: null,
@@ -48,7 +59,7 @@ export const defaultSeed = internalMutation({
     });
 
     const leoId = await ctx.db.insert("users", {
-      email: "leo@example.com",
+      email: demoEmails[2],
       passwordHash,
       displayName: "Leo Martinez",
       photoURL: null,
@@ -59,7 +70,7 @@ export const defaultSeed = internalMutation({
     });
 
     const priyaId = await ctx.db.insert("users", {
-      email: "priya@example.com",
+      email: demoEmails[3],
       passwordHash,
       displayName: "Priya Shah",
       photoURL: null,
@@ -70,6 +81,7 @@ export const defaultSeed = internalMutation({
     });
 
     const everyone = [youId, mayaId, leoId, priyaId];
+    const brunchAttendees = [youId, leoId, priyaId, mayaId];
 
     const defaultScoring = [
       { id: "c0", name: "Deliciousness", description: "Flavor, taste, and how much you’d want another bite.", weight: 60 },
@@ -94,7 +106,7 @@ export const defaultSeed = internalMutation({
       categoryIds: ["c0", "c1"],
       dishCategories: categories(["Main dishes", "Salads", "Desserts"]),
       coverImage: null,
-      inviteCode: "HARVEST-7K2Q",
+      inviteCode: demoCodes[0],
       hostId: youId,
       memberIds: everyone,
       status: "closed",
@@ -112,7 +124,7 @@ export const defaultSeed = internalMutation({
     });
 
     await ctx.db.insert("inviteCodes", {
-      code: "HARVEST-7K2Q",
+      code: demoCodes[0],
       potluckId: p1Id,
       hostId: youId,
       createdAt: day(-8),
@@ -232,7 +244,7 @@ export const defaultSeed = internalMutation({
       categoryIds: ["c0", "c1", "c2"],
       dishCategories: categories(["Mezze", "Mains", "Sweets"]),
       coverImage: null,
-      inviteCode: "SUNSET-4MXR",
+      inviteCode: demoCodes[1],
       hostId: priyaId,
       memberIds: everyone,
       status: "voting",
@@ -243,7 +255,7 @@ export const defaultSeed = internalMutation({
     });
 
     await ctx.db.insert("inviteCodes", {
-      code: "SUNSET-4MXR",
+      code: demoCodes[1],
       potluckId: p2Id,
       hostId: priyaId,
       createdAt: day(-2),
@@ -371,9 +383,9 @@ export const defaultSeed = internalMutation({
       categoryIds: ["c0", "c1"],
       dishCategories: categories(["Sweet", "Savory", "Drinks"]),
       coverImage: null,
-      inviteCode: "BRUNCH-9PLT",
+      inviteCode: demoCodes[2],
       hostId: mayaId,
-      memberIds: [youId, leoId, priyaId, mayaId],
+      memberIds: brunchAttendees,
       status: "open",
       podium: [],
       results: null,
@@ -382,7 +394,7 @@ export const defaultSeed = internalMutation({
     });
 
     await ctx.db.insert("inviteCodes", {
-      code: "BRUNCH-9PLT",
+      code: demoCodes[2],
       potluckId: p3Id,
       hostId: mayaId,
       createdAt: day(-1),
@@ -426,7 +438,7 @@ export const defaultSeed = internalMutation({
       categoryIds: ["c0", "c1"],
       dishCategories: categories(["Dumplings", "Sides"]),
       coverImage: null,
-      inviteCode: "DUMPLING-3QZ",
+      inviteCode: demoCodes[3],
       hostId: leoId,
       memberIds: [leoId],
       status: "open",
@@ -437,13 +449,16 @@ export const defaultSeed = internalMutation({
     });
 
     await ctx.db.insert("inviteCodes", {
-      code: "DUMPLING-3QZ",
+      code: demoCodes[3],
       potluckId: p4Id,
       hostId: leoId,
       createdAt: day(-1),
     });
 
-    for (const p of await ctx.db.query("potlucks").collect()) await syncMemberships(ctx, p._id, p.memberIds);
+    await syncMemberships(ctx, p1Id, everyone);
+    await syncMemberships(ctx, p2Id, everyone);
+    await syncMemberships(ctx, p3Id, brunchAttendees);
+    await syncMemberships(ctx, p4Id, [leoId]);
 
     return {
       success: true,
