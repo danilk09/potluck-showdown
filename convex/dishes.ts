@@ -59,7 +59,12 @@ function aiCategoryIds(potluck: Doc<"potlucks">) {
 }
 
 async function insertDish(
-  ctx: MutationCtx, potluck: Doc<"potlucks">, userId: Id<"users">, form: any, aiScores?: Record<string, number>
+  ctx: MutationCtx,
+  potluck: Doc<"potlucks">,
+  userId: Id<"users">,
+  form: any,
+  aiScores?: Record<string, number>,
+  clientRequestAt?: number,
 ) {
   const now = Date.now();
   if (!potluck.memberIds.includes(userId)) {
@@ -86,6 +91,7 @@ async function insertDish(
     likedBy: [],
     createdAt: now,
     updatedAt: now,
+    ...(clientRequestAt !== undefined ? { clientRequestAt } : {}),
   });
 }
 
@@ -160,6 +166,20 @@ async function getScoredDishContext(ctx: QueryCtx | MutationCtx, args: {
   return { potluck, user, dish, categoryIds };
 }
 
+async function findDishByScoreRequest(
+  ctx: QueryCtx | MutationCtx,
+  potluckId: Id<"potlucks">,
+  authorId: Id<"users">,
+  clientRequestAt: number,
+) {
+  return await ctx.db
+    .query("dishes")
+    .withIndex("by_potluckId_and_authorId_and_clientRequestAt", (q) =>
+      q.eq("potluckId", potluckId).eq("authorId", authorId).eq("clientRequestAt", clientRequestAt),
+    )
+    .unique();
+}
+
 const scoreTarget = {
   sessionToken: scoredDishArgs.sessionToken,
   potluckId: scoredDishArgs.potluckId,
@@ -192,13 +212,22 @@ export const saveScoredDish = internalMutation({
   returns: v.id("dishes"),
   handler: async (ctx, args) => {
     const { potluck, user, dish, categoryIds } = await getScoredDishContext(ctx, args, Date.now());
-    if ((dish?.updatedAt ?? null) !== args.expectedUpdatedAt) {
+    const aiScores = Object.fromEntries(categoryIds.map((id) => [id, args.score]));
+    if (dish) {
+      if (dish.updatedAt !== args.expectedUpdatedAt) {
+        throw new ConvexError("This dish changed during scoring. Please try again.");
+      }
+      return await patchDish(ctx, dish, args.form ?? {}, aiScores);
+    }
+    if (!args.form) throw new ConvexError("Add dish details before calculating a health score.");
+    // Scoring runs outside this transaction. A retry or overlapping attempt
+    // still omits dishId, so reuse the dish this request already created.
+    const existing = await findDishByScoreRequest(ctx, potluck._id, user._id, args.form.updatedAt);
+    if (existing) return existing._id;
+    if (args.expectedUpdatedAt !== null) {
       throw new ConvexError("This dish changed during scoring. Please try again.");
     }
-    const aiScores = Object.fromEntries(categoryIds.map((id) => [id, args.score]));
-    if (dish) return await patchDish(ctx, dish, args.form ?? {}, aiScores);
-    if (!args.form) throw new ConvexError("Add dish details before calculating a health score.");
-    return await insertDish(ctx, potluck, user._id, args.form, aiScores);
+    return await insertDish(ctx, potluck, user._id, args.form, aiScores, args.form.updatedAt);
   },
 });
 
