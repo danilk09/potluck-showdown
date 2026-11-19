@@ -151,9 +151,11 @@ describe("evaluation seed", () => {
     expect(shrimpAfter.likedBy).toEqual(shrimp.likedBy);
     expect(seeded.testerBallots?.filter((b) => b.voter === "sam")).toHaveLength(2);
 
-    // Signed out, and the feedback is gone; the account still signs in with the same password.
+    // Signed out, but the feedback (evaluation data) is kept and the popup will show for the next participant.
     expect(await t.query(api.users.currentUser, { sessionToken: sam })).toBeNull();
-    expect(await t.run((ctx) => ctx.db.query("feedback").collect())).toEqual([]);
+    expect(await t.run((ctx) => ctx.db.query("feedback").collect())).toMatchObject([{ userId: await uidOf("morgan"), rating: 4 }]);
+    const morganAgain = await signIn("morgan");
+    expect(await t.query(api.users.currentUser, { sessionToken: morganAgain })).toMatchObject({ feedbackPromptedIds: [] });
     const samAgain = await signIn("sam");
     expect(await t.query(api.voting.listMyRatings, { sessionToken: samAgain, potluckId: p2._id })).toHaveLength(2);
   });

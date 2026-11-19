@@ -3,6 +3,7 @@
 //
 //   npm run eval:seed        wipe the local database and load everything
 //   npm run eval:reset-a     put phone A's three test accounts back to their starting state
+//                            (feedback they submitted is kept)
 //   npm run eval:reset-b     same for phone B (phone A is untouched)
 //
 // Everything is internal: only someone with deploy access can run it.
@@ -740,8 +741,9 @@ export const resetTesters = internalMutation({
     for (const key of keys) {
       const uid = await userId(ctx, key);
 
-      // Sign the phone out and forget anything the participant changed or sent.
-      for (const table of ["sessions", "passwordResets", "feedback"] as const) {
+      // Sign the phone out and forget what the participant changed. Feedback they
+      // sent is kept: it's evaluation data (only npm run eval:seed clears it).
+      for (const table of ["sessions", "passwordResets"] as const) {
         for (const row of await ctx.db.query(table).withIndex("by_userId", (q) => q.eq("userId", uid)).collect()) {
           await ctx.db.delete(row._id);
         }
