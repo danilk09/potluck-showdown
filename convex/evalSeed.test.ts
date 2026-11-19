@@ -63,10 +63,17 @@ describe("evaluation seed", () => {
     const preview = await t.query(api.potlucks.lookupByInvite, { sessionToken: jordan, code: "ohana-4kp2" });
     expect(preview?.title).toBe("Hale Aloha Ohana Potluck");
     await t.mutation(api.potlucks.join, { sessionToken: jordan, potluckId: p._id });
-    await t.mutation(api.dishes.claim, {
+    // What dishHealth.calculateAndSave does once the AI returns a score.
+    await t.mutation(internal.dishes.saveScoredDish, {
       sessionToken: jordan,
       potluckId: p._id,
-      form: { name: "Iced Lilikoi Tea", categoryId: "k4", ingredients: ["tea", "lilikoi"], allergens: [], dietary: [] },
+      form: {
+        name: "Iced Lilikoi Tea", categoryId: "k4", serves: "12", ingredients: ["8 cups black tea", "1 cup lilikoi juice"],
+        steps: "Brew, chill and stir in the juice.", allergens: [], dietary: ["Vegan"], prepMinutes: 15, calories: 40,
+        photo: null, recipePhoto: null, usedRequired: false, updatedAt: 1,
+      },
+      score: 74,
+      expectedUpdatedAt: null,
     });
   });
 

@@ -4,7 +4,6 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '../../../../hooks/AuthContext';
 import { useDishes, usePotluck } from '../../../../hooks/useFirestore';
 import { deleteDish, friendlyError, saveDish } from '../../../../data/api';
-import { HealthScoreModal } from '../../../../components/HealthScoreMeter';
 import { COMMON_ALLERGENS, DIETARY_LABELS, formatInfo } from '../../../../lib/formats';
 import { phaseOf } from '../../../../lib/phase';
 import Avatar from '../../../../components/Avatar';
@@ -86,7 +85,6 @@ function DishEditor({ potluck, dishes, existing, categoryId }: { potluck: any; d
   const [busy, setBusy] = useState(false);
   const [extraAllergen, setExtraAllergen] = useState('');
   const [extraDietary, setExtraDietary] = useState('');
-  const [calc, setCalc] = useState<{ saving: boolean } | null>(null);
 
   const uid = user?.uid || '';
   const fmt = formatInfo(potluck.format);
@@ -103,31 +101,23 @@ function DishEditor({ potluck, dishes, existing, categoryId }: { potluck: any; d
     needsRequired && !form.usedRequired && 'Confirm you used every required ingredient',
   ].filter(Boolean) as string[];
 
-  const persist = async (aiScores?: Record<string, number>) => {
+  const persist = async () => {
     setBusy(true);
     try {
-      const payload = aiScores
-        ? { ...form, aiScores: { ...existing?.aiScores, ...aiScores } }
-        : form;
-      await saveDish(pid, payload, existing);
+      await saveDish(pid, form, existing, aiCategories.length > 0);
       toast(existing ? 'Dish updated' : 'Dish added! 🎉');
       router.back();
     } catch (err) {
-      setCalc(null);
       showProblem({ title: 'Couldn’t save your dish', message: friendlyError(err) });
       setBusy(false);
     }
   };
 
   const submit = () => {
-    if (calc) return;
+    if (busy) return;
     if (missing.length) {
       setChecked(true);
       showProblem({ missing });
-      return;
-    }
-    if (aiCategories.length) {
-      setCalc({ saving: false });
       return;
     }
     void persist();
@@ -160,7 +150,7 @@ function DishEditor({ potluck, dishes, existing, categoryId }: { potluck: any; d
     <Screen footer={(
       <Button
         size="lg"
-        title={busy ? 'Saving…' : aiCategories.length ? (existing ? 'Calculate & save' : 'Calculate & add dish') : existing ? 'Save Dish' : 'Add Dish'}
+        title={busy ? (aiCategories.length ? 'Calculating health score…' : 'Saving…') : aiCategories.length ? (existing ? 'Calculate & save' : 'Calculate & add dish') : existing ? 'Save Dish' : 'Add Dish'}
         loading={busy}
         onPress={submit}
       />
@@ -214,6 +204,7 @@ function DishEditor({ potluck, dishes, existing, categoryId }: { potluck: any; d
 
         <Field label="Ingredients" required invalid={checked && !form.ingredients.trim()} {...field('ingredients')} rows={4}
           placeholder={'One per line, or separated by commas\n8 oz wheat noodles\n2 tbsp sesame paste'} />
+        {aiCategories.length > 0 && <Hint>Include ingredient amounts for a more accurate health score.</Hint>}
         {needsRequired && (
           <Tile tone="gold" style={{ padding: 14 }}>
             <Checkbox checked={form.usedRequired} onChange={(v) => set('usedRequired', v)}>
@@ -271,19 +262,6 @@ function DishEditor({ potluck, dishes, existing, categoryId }: { potluck: any; d
 
         {existing && <Button variant="linkDanger" title="Remove my dish" onPress={remove} />}
       </Stack>
-      {calc != null && (
-        <HealthScoreModal
-          visible
-          categories={aiCategories.map((c: any) => ({ id: c.id, name: c.name }))}
-          saving={calc.saving}
-          savingLabel="Saving dish…"
-          onCancel={() => { if (!calc.saving) setCalc(null); }}
-          onComplete={(scores) => {
-            setCalc({ saving: true });
-            void persist(scores);
-          }}
-        />
-      )}
     </Screen>
   );
 }

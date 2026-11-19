@@ -4,7 +4,7 @@ import { generateInviteCode, isValidInviteCode, normalizeInviteCode } from "../.
 import { phaseOf } from "../../src/lib/phase";
 import { earnedFrames, winCount } from "../../src/lib/frames";
 import { dishFields, potluckFields, toList } from "../../src/data/builders";
-import { aiScoreOnFive, healthPoints, mockHealthScore, supportsAiScoring } from "../../src/lib/healthScore";
+import { aiScoreOnFive, healthPoints, supportsAiScoring } from "../../src/lib/healthScore";
 import { inviteMessage } from "../../src/lib/inviteMessage";
 import { formatServes } from "../../src/lib/formats";
 
@@ -148,10 +148,7 @@ describe("frames", () => {
 });
 
 describe("health scores", () => {
-  it("rolls a stand-in score from 0 to 100", () => {
-    expect(mockHealthScore(() => 0)).toBe(0);
-    expect(mockHealthScore(() => 0.999)).toBe(100);
-    expect(mockHealthScore(() => 1)).toBe(100);
+  it("converts stored health points to the five-star scale", () => {
     expect(aiScoreOnFive(80)).toBe(4);
     expect(healthPoints({ aiScores: { c1: 82.4 } }, "c1")).toBe(82);
     expect(healthPoints({ aiScores: {} }, "c1")).toBeNull();
@@ -163,7 +160,7 @@ describe("health scores", () => {
     expect(supportsAiScoring("Deliciousness")).toBe(false);
   });
 
-  it("stores the scoring mode and the dish score", () => {
+  it("stores the scoring mode and leaves scores out of client dish fields", () => {
     const fields = potluckFields({
       title: "Harvest",
       date: "2026-10-29",
@@ -176,8 +173,7 @@ describe("health scores", () => {
       dishCategories: [],
     });
     expect(fields.scoring.map((c: any) => c.mode ?? "manual")).toEqual(["manual", "ai"]);
-    expect(dishFields({ name: "Soup", categoryId: "k", aiScores: { c1: 80 } }).aiScores).toEqual({ c1: 80 });
-    expect(dishFields({ name: "Soup", categoryId: "k" }).aiScores).toBeUndefined();
+    expect(dishFields({ name: "Soup", categoryId: "k", aiScores: { c1: 80 } })).not.toHaveProperty("aiScores");
   });
 });
 

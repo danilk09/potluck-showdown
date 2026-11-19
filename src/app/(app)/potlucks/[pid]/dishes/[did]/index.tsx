@@ -3,8 +3,8 @@ import { Pressable, Text, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '../../../../../../hooks/AuthContext';
 import { useDocData, useMyRatings, usePotluck } from '../../../../../../hooks/useFirestore';
-import { friendlyError, saveDish, toggleLike } from '../../../../../../data/api';
-import { HealthScoreMeter, HealthScoreModal } from '../../../../../../components/HealthScoreMeter';
+import { friendlyError, recalculateDishHealth, toggleLike } from '../../../../../../data/api';
+import { HealthScoreMeter } from '../../../../../../components/HealthScoreMeter';
 import { healthPoints } from '../../../../../../lib/healthScore';
 import { phaseOf } from '../../../../../../lib/phase';
 import { categoryAverage, overallScore } from '../../../../../../lib/scoring';
@@ -26,7 +26,6 @@ export default function DishDetail() {
   const isMember = Boolean(potluck?.memberIds.includes(uid));
   const { data: dish, loading: dishLoading, error } = useDocData(isMember ? `potlucks/${pid}/dishes/${did}` : null);
   const { ratings } = useMyRatings(pid, isMember);
-  const [calcCategory, setCalcCategory] = useState<any>(null);
   const [savingScore, setSavingScore] = useState(false);
 
   if (loading || (isMember && dishLoading)) return <LoadingScreen />;
@@ -48,15 +47,14 @@ export default function DishDetail() {
   const aiScoring = potluck.scoring.filter((c: any) => c.mode === 'ai');
   const needsVotes = potluck.scoring.some((c: any) => c.mode !== 'ai');
 
-  const saveCalculated = async (scores: Record<string, number>) => {
+  const calculateScore = async () => {
+    if (savingScore) return;
     setSavingScore(true);
     try {
-      await saveDish(pid, { ...dish, aiScores: { ...dish.aiScores, ...scores } }, dish);
+      await recalculateDishHealth(pid, dish.id);
       toast('Health score saved');
-      setCalcCategory(null);
     } catch (err) {
       toast(friendlyError(err), 'danger');
-      setCalcCategory(null);
     } finally {
       setSavingScore(false);
     }
@@ -116,23 +114,24 @@ export default function DishDetail() {
         <View style={{ gap: 8, marginBottom: 16 }}>
           {aiScoring.map((c: any) => {
             const points = healthPoints(dish, c.id);
-            if (calcCategory?.id === c.id) return null;
             return (
               <View key={c.id}>
                 <HealthScoreMeter
                   title={c.name}
-                  variant="reveal"
                   score={points}
-                  action={mine && phase === 'open' && points == null ? (
-                    <Button title="Calculate health score" onPress={() => setCalcCategory(c)} />
-                  ) : undefined}
                 />
-                {mine && phase === 'open' && points != null && (
-                  <Button variant="link" title="Calculate again" style={{ alignSelf: 'flex-start' }} onPress={() => setCalcCategory(c)} />
-                )}
               </View>
             );
           })}
+          {mine && phase === 'open' && (
+            <Button
+              variant="link"
+              title={savingScore ? 'Calculating health score…' : 'Calculate health score'}
+              loading={savingScore}
+              style={{ alignSelf: 'flex-start' }}
+              onPress={calculateScore}
+            />
+          )}
         </View>
       )}
 
@@ -198,16 +197,6 @@ export default function DishDetail() {
           </View>
         )}
       </Card>
-      {calcCategory != null && (
-        <HealthScoreModal
-          visible
-          categories={[{ id: calcCategory.id, name: calcCategory.name }]}
-          saving={savingScore}
-          savingLabel="Saving score…"
-          onCancel={() => { if (!savingScore) setCalcCategory(null); }}
-          onComplete={(scores) => { void saveCalculated(scores); }}
-        />
-      )}
     </Screen>
   );
 }

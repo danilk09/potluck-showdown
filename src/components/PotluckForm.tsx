@@ -625,13 +625,12 @@ function PotluckEditor({ existing, userId }: { existing: any; userId: string }) 
                       {c.mode === "ai" && (
                         <>
                           <Hint>
-                            Saving a dish plays a short calculation and stores a stand-in score. Real AI scoring comes
-                            later.
+                            Ingredient amounts and USDA nutrition data determine a score out of 100 when a dish is saved.
                           </Hint>
                           <Button
                             variant="link"
                             icon="sparkles"
-                            title="Preview the calculation"
+                            title="Preview a sample score"
                             style={{ alignSelf: "flex-start" }}
                             onPress={() => setScorePreview(c.name || "Healthiness")}
                           />
@@ -806,10 +805,8 @@ function PotluckEditor({ existing, userId }: { existing: any; userId: string }) 
       )}
       {scorePreview != null && (
         <HealthScoreModal
-          visible
-          purpose="preview"
-          categories={[{ id: "preview", name: scorePreview }]}
-          onCancel={() => setScorePreview(null)}
+          title={scorePreview}
+          onClose={() => setScorePreview(null)}
         />
       )}
     </Screen>

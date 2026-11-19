@@ -122,9 +122,17 @@ export default defineSchema({
     likedBy: v.array(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
+    // Identifies the scoring request that created this dish. Retries of that
+    // request omit dishId, so the save looks this up instead of inserting again.
+    clientRequestAt: v.optional(v.number()),
   })
     .index("by_potluckId", ["potluckId"])
-    .index("by_authorId", ["authorId"]),
+    .index("by_authorId", ["authorId"])
+    .index("by_potluckId_and_authorId_and_clientRequestAt", [
+      "potluckId",
+      "authorId",
+      "clientRequestAt",
+    ]),
 
   ballots: defineTable({
     potluckId: v.string(),

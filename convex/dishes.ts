@@ -1,23 +1,23 @@
-import { mutation, query } from "./_generated/server";
+import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
+import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
-import type { Doc } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import {
   deleteImageRef, dishesEditable, fail, getDish, getPotluck, getSessionUser, isMember, potlucksForUser,
   requireMember, requireOwnImage, requirePotluck, requireUser, validateDishForm,
 } from "./lib/access";
 import { deleteDishCascade } from "./lib/cascade";
+import { scoredDishArgs } from "./scoredDishArgs";
 
 const withId = (d: Doc<"dishes">) => ({ id: d._id, ...d });
 
-function cleanAiScores(raw: unknown): Record<string, number> | undefined {
-  if (!raw || typeof raw !== "object") return undefined;
-  const out: Record<string, number> = {};
-  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
-    const n = Number(value);
-    if (!key || !Number.isFinite(n)) continue;
-    out[key] = Math.max(0, Math.min(100, Math.round(n)));
-  }
-  return Object.keys(out).length ? out : undefined;
+function aiCategoryIds(potluck: Doc<"potlucks">) {
+  return potluck.scoring.filter(({ mode }) => mode === "ai").map(({ id }) => id);
+}
+
+/** Potlucks with an AI-scored category save dishes through dishHealth.calculateAndSave instead. */
+function requireManualScoring(potluck: Doc<"potlucks">) {
+  if (aiCategoryIds(potluck).length) fail("Calculate a health score before saving this dish.");
 }
 
 /** Dishes (and their recipes) are only visible to that potluck's members. */
@@ -65,35 +65,69 @@ export const recipeBank = query({
   },
 });
 
+/** Inserts a validated dish for a member while dishes are still editable. */
+async function insertDish(
+  ctx: MutationCtx,
+  potluck: Doc<"potlucks">,
+  userId: Id<"users">,
+  form: any,
+  aiScores?: Record<string, number>,
+  clientRequestAt?: number,
+) {
+  const fields = validateDishForm(form, potluck);
+  await requireOwnImage(ctx, fields.photo, potluck._id, userId);
+  await requireOwnImage(ctx, fields.recipePhoto, potluck._id, userId);
+  const now = Date.now();
+  return await ctx.db.insert("dishes", {
+    ...fields,
+    potluckId: potluck._id,
+    authorId: userId,
+    scoreSums: {},
+    ...(aiScores ? { aiScores } : {}),
+    ratingCount: 0,
+    likedBy: [],
+    createdAt: now,
+    updatedAt: now,
+    ...(clientRequestAt !== undefined ? { clientRequestAt } : {}),
+  });
+}
+
+/** Applies a validated edit, deleting any photo it replaces. */
+async function patchDish(
+  ctx: MutationCtx,
+  potluck: Doc<"potlucks">,
+  dish: Doc<"dishes">,
+  userId: Id<"users">,
+  form: any,
+  aiScores?: Record<string, number>,
+) {
+  const fields = validateDishForm({ ...dish, ...form }, potluck);
+  for (const key of ["photo", "recipePhoto"] as const) {
+    if (fields[key] !== (dish[key] ?? null)) {
+      await requireOwnImage(ctx, fields[key], potluck._id, userId);
+      await deleteImageRef(ctx, dish[key]);
+    }
+  }
+  await ctx.db.patch(dish._id, { ...fields, ...(aiScores ? { aiScores } : {}), updatedAt: Date.now() });
+  return dish._id;
+}
+
 export const claim = mutation({
   args: { sessionToken: v.string(), potluckId: v.string(), form: v.any() },
+  returns: v.id("dishes"),
   handler: async (ctx, args) => {
     const user = await requireUser(ctx, args.sessionToken);
     const potluck = await requirePotluck(ctx, args.potluckId);
     requireMember(potluck, user);
     if (!dishesEditable(potluck)) fail("Voting has started, so dishes are locked.");
-    const fields = validateDishForm(args.form, potluck);
-    await requireOwnImage(ctx, fields.photo, potluck._id, user._id);
-    await requireOwnImage(ctx, fields.recipePhoto, potluck._id, user._id);
-
-    const now = Date.now();
-    const aiScores = cleanAiScores(args.form.aiScores);
-    return await ctx.db.insert("dishes", {
-      ...fields,
-      potluckId: potluck._id,
-      authorId: user._id,
-      scoreSums: {},
-      ...(aiScores ? { aiScores } : {}),
-      ratingCount: 0,
-      likedBy: [],
-      createdAt: now,
-      updatedAt: now,
-    });
+    requireManualScoring(potluck);
+    return await insertDish(ctx, potluck, user._id, args.form);
   },
 });
 
 export const update = mutation({
   args: { sessionToken: v.string(), dishId: v.string(), form: v.any() },
+  returns: v.id("dishes"),
   handler: async (ctx, args) => {
     const user = await requireUser(ctx, args.sessionToken);
     const dish = await getDish(ctx, args.dishId);
@@ -101,21 +135,90 @@ export const update = mutation({
     if (dish.authorId !== user._id) fail("Only the dish creator can edit this dish.");
     const potluck = await requirePotluck(ctx, dish.potluckId);
     if (!dishesEditable(potluck)) fail("Voting has started, so dishes are locked.");
+    requireManualScoring(potluck);
+    return await patchDish(ctx, potluck, dish, user._id, args.form);
+  },
+});
 
-    const fields = validateDishForm({ ...dish, ...args.form }, potluck);
-    for (const key of ["photo", "recipePhoto"] as const) {
-      if (fields[key] !== (dish[key] ?? null)) {
-        await requireOwnImage(ctx, fields[key], potluck._id, user._id);
-        await deleteImageRef(ctx, dish[key]);
-      }
+// ---------- AI health scoring (see dishHealth.ts) ----------
+
+async function getScoredDishContext(
+  ctx: QueryCtx | MutationCtx,
+  args: { sessionToken: string; potluckId: Id<"potlucks">; dishId?: Id<"dishes"> },
+  now: number,
+) {
+  const user = await requireUser(ctx, args.sessionToken);
+  const potluck = await getPotluck(ctx, args.potluckId);
+  if (!potluck || !isMember(potluck, user._id)) fail("Join this potluck first.");
+  if (!dishesEditable(potluck, now)) fail("Dishes are locked once voting starts.");
+  const categoryIds = aiCategoryIds(potluck);
+  if (!categoryIds.length) fail("AI health scoring is no longer enabled for this potluck.");
+  const dish = args.dishId ? await ctx.db.get(args.dishId) : null;
+  if (args.dishId && (!dish || dish.potluckId !== potluck._id || dish.authorId !== user._id)) {
+    fail("Only the dish creator can edit this dish.");
+  }
+  return { potluck, user, dish, categoryIds };
+}
+
+async function findDishByScoreRequest(
+  ctx: QueryCtx | MutationCtx,
+  potluckId: Id<"potlucks">,
+  authorId: Id<"users">,
+  clientRequestAt: number,
+) {
+  return await ctx.db
+    .query("dishes")
+    .withIndex("by_potluckId_and_authorId_and_clientRequestAt", (q) =>
+      q.eq("potluckId", potluckId).eq("authorId", authorId).eq("clientRequestAt", clientRequestAt),
+    )
+    .unique();
+}
+
+const scoreTarget = {
+  sessionToken: scoredDishArgs.sessionToken,
+  potluckId: scoredDishArgs.potluckId,
+  dishId: scoredDishArgs.dishId,
+};
+
+export const prepareScoredDish = internalQuery({
+  args: { ...scoreTarget, now: v.number() },
+  returns: v.object({
+    ingredients: v.array(v.string()),
+    steps: v.optional(v.string()),
+    updatedAt: v.union(v.number(), v.null()),
+  }),
+  handler: async (ctx, args) => {
+    const { dish } = await getScoredDishContext(ctx, args, args.now);
+    return {
+      ingredients: dish?.ingredients ?? [],
+      ...(dish?.steps !== undefined ? { steps: dish.steps } : {}),
+      updatedAt: dish?.updatedAt ?? null,
+    };
+  },
+});
+
+export const saveScoredDish = internalMutation({
+  args: {
+    ...scoredDishArgs,
+    score: v.number(),
+    expectedUpdatedAt: v.union(v.number(), v.null()),
+  },
+  returns: v.id("dishes"),
+  handler: async (ctx, args) => {
+    const { potluck, user, dish, categoryIds } = await getScoredDishContext(ctx, args, Date.now());
+    const score = Math.max(0, Math.min(100, Math.round(args.score)));
+    const aiScores = Object.fromEntries(categoryIds.map((id) => [id, score]));
+    if (dish) {
+      if (dish.updatedAt !== args.expectedUpdatedAt) fail("This dish changed during scoring. Please try again.");
+      return await patchDish(ctx, potluck, dish, user._id, args.form ?? {}, aiScores);
     }
-    const patch: Partial<Doc<"dishes">> = { ...fields, updatedAt: Date.now() };
-    if (args.form.aiScores !== undefined) {
-      const aiScores = cleanAiScores(args.form.aiScores);
-      if (aiScores) patch.aiScores = { ...(dish.aiScores ?? {}), ...aiScores };
-    }
-    await ctx.db.patch(dish._id, patch);
-    return dish._id;
+    if (!args.form) fail("Add dish details before calculating a health score.");
+    // Scoring runs outside this transaction. A retry or overlapping attempt
+    // still omits dishId, so reuse the dish this request already created.
+    const existing = await findDishByScoreRequest(ctx, potluck._id, user._id, args.form.updatedAt);
+    if (existing) return existing._id;
+    if (args.expectedUpdatedAt !== null) fail("This dish changed during scoring. Please try again.");
+    return await insertDish(ctx, potluck, user._id, args.form, aiScores, args.form.updatedAt);
   },
 });
 

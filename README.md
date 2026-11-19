@@ -45,6 +45,13 @@ one you can vote in right now, one you can add a dish to, one you already won, a
   `public/og-invite.png` (regenerate it with `npm run icons`). Set `EXPO_PUBLIC_WEB_URL` before `npm run build:web`
   so the picture gets a full URL.
 
+## AI healthiness scoring
+
+AI Healthiness uses Privatemode GLM Flash and USDA FoodData Central. It checks Open Food Facts
+when USDA is unavailable or has no suitable record. Set `PRIVATE_MODE_API_KEY` for AI scoring
+and `USDA_API_KEY` for the primary USDA lookup in the Convex deployment’s Environment Variables.
+[Open Food Facts data](https://world.openfoodfacts.org/data) is available under the Open Database License.
+
 ## How the requirements map to the code
 
 | Requirement | Where |

@@ -479,7 +479,15 @@ describe("changes: memberships, prizes, weights, feedback, deleted accounts", ()
       }),
     });
     await t.mutation(api.potlucks.join, { sessionToken: guest.token, potluckId });
-    const dishId = await t.mutation(api.dishes.claim, { sessionToken: host.token, potluckId, form: dishForm({ aiScores: { c1: 80 } }) });
+    // AI potlucks refuse plain saves; dishes go through the scoring action's save step.
+    await expect(t.mutation(api.dishes.claim, { sessionToken: host.token, potluckId, form: dishForm() })).rejects.toThrow(/health score/);
+    const dishId = await t.mutation(internal.dishes.saveScoredDish, {
+      sessionToken: host.token,
+      potluckId: potluckId as any,
+      form: { ...dishForm(), serves: "6", steps: "Simmer.", prepMinutes: 30, updatedAt: 1 },
+      score: 80,
+      expectedUpdatedAt: null,
+    });
     await t.mutation(api.potlucks.openVoting, { sessionToken: host.token, potluckId });
     await t.mutation(api.voting.submitBallot, { sessionToken: guest.token, potluckId, dishId, scores: { c0: 4 } });
     const dish = await t.query(api.dishes.get, { sessionToken: guest.token, dishId });

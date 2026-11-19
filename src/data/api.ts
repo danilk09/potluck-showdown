@@ -3,6 +3,7 @@ import { api } from "../../convex/_generated/api";
 import { dishFields, potluckFields } from "./builders";
 import { IMAGE_REF_PREFIX, isImageRef } from "../lib/images";
 import { normalizeInviteCode } from "../lib/inviteCode";
+import type { Id } from "../../convex/_generated/dataModel";
 
 async function token(): Promise<string> {
   const t = await getStoredToken();
@@ -155,7 +156,7 @@ export async function publishResults(potluck: any): Promise<void> {
 
 // ---------- dishes ----------
 
-export async function saveDish(potluckId: string, form: any, existing?: any): Promise<void> {
+export async function saveDish(potluckId: string, form: any, existing?: any, scoreHealth = false): Promise<void> {
   const t = await token();
   const values = { ...form };
   const uploaded: string[] = [];
@@ -168,7 +169,15 @@ export async function saveDish(potluckId: string, form: any, existing?: any): Pr
       }
     }
     const fields = dishFields(values);
-    if (existing) {
+    if (scoreHealth) {
+      // Potlucks with AI health scoring save through the scoring action.
+      await convex.action(api.dishHealth.calculateAndSave, {
+        sessionToken: t,
+        potluckId: potluckId as Id<"potlucks">,
+        ...(existing ? { dishId: existing.id } : {}),
+        form: fields,
+      });
+    } else if (existing) {
       await convex.mutation(api.dishes.update, { sessionToken: t, dishId: existing.id, form: fields });
     } else {
       await convex.mutation(api.dishes.claim, { sessionToken: t, potluckId, form: fields });
@@ -181,6 +190,14 @@ export async function saveDish(potluckId: string, form: any, existing?: any): Pr
   for (const key of ["photo", "recipePhoto"]) {
     if (existing?.[key] && existing[key] !== values[key]) forgetImage(existing[key]);
   }
+}
+
+export async function recalculateDishHealth(potluckId: string, dishId: string): Promise<void> {
+  await convex.action(api.dishHealth.calculateAndSave, {
+    sessionToken: await token(),
+    potluckId: potluckId as Id<"potlucks">,
+    dishId: dishId as Id<"dishes">,
+  });
 }
 
 export async function deleteDish(potluckId: string, dish: any): Promise<void> {
