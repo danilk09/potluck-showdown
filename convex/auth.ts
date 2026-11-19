@@ -79,7 +79,7 @@ function cleanName(name?: string) {
 }
 
 export const signUp = action({
-  args: { email: v.string(), password: v.string(), displayName: v.string() },
+  args: { email: v.string(), password: v.string(), displayName: v.string(), referredBy: v.optional(v.string()) },
   handler: async (ctx, args): Promise<{ sessionToken: string }> => {
     const email = cleanEmail(args.email);
     checkPassword(args.password);
@@ -90,6 +90,7 @@ export const signUp = action({
       displayName: cleanName(args.displayName),
       isGuest: false,
       sessionToken,
+      referredBy: args.referredBy,
     });
     return { sessionToken };
   },
@@ -121,13 +122,14 @@ export const signIn = action({
 });
 
 export const signInGuest = action({
-  args: { displayName: v.optional(v.string()) },
+  args: { displayName: v.optional(v.string()), referredBy: v.optional(v.string()) },
   handler: async (ctx, args): Promise<{ sessionToken: string }> => {
     const sessionToken = newSessionToken();
     await ctx.runMutation(internal.authStore.createUser, {
       displayName: cleanName(args.displayName),
       isGuest: true,
       sessionToken,
+      referredBy: args.referredBy,
     });
     return { sessionToken };
   },

@@ -91,3 +91,11 @@ export const COMMON_ALLERGENS = [
   "Shellfish",
   "Sesame",
 ];
+
+/** "8" → "8 people". Older dishes stored free text ("12 squares"), shown as is. */
+export function formatServes(serves?: string | null): string {
+  const s = (serves ?? "").trim();
+  if (!s) return "—";
+  if (!/^\d+$/.test(s)) return s;
+  return `${s} ${s === "1" ? "person" : "people"}`;
+}

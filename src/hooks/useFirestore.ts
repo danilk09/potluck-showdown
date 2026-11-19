@@ -111,3 +111,10 @@ export function useNow(intervalMs: number = 30_000): number {
   }, [intervalMs]);
   return now;
 }
+
+/** The signed-in user's counts behind the achievement frames (live). */
+export function useMyStats() {
+  const { sessionToken } = useAuth();
+  const stats = useQuery(api.users.myStats, sessionToken ? { sessionToken } : "skip");
+  return { data: stats ?? null, loading: stats === undefined && Boolean(sessionToken) };
+}

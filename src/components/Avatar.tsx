@@ -1,7 +1,7 @@
-import React from "react";
-import { Image, StyleSheet, Text, View, StyleProp, ViewStyle } from "react-native";
+import React, { useEffect } from "react";
+import { Animated, Easing, Image, Platform, StyleSheet, Text, View, StyleProp, ViewStyle } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
-import { FRAMES } from "../lib/frames";
+import { achievementById, frameInfo } from "../lib/achievements";
 import { useProfiles } from "../hooks/useProfiles";
 import { colors, type } from "../theme";
 
@@ -14,6 +14,60 @@ const FRAME_GRADIENTS: Record<string, [string, string, ...string[]]> = {
   bronze: ["#f0b98a", "#b5703b", "#ffd9b8", "#9a5a2a"],
   host: [colors.coral, colors.gold, colors.lilac, colors.mint],
 };
+
+const HOLO = ["#ff6ec4", "#ffd86b", "#4ade80", "#38bdf8", "#7873f5", "#ff6ec4"] as const;
+
+interface FrameLook {
+  colors: readonly [string, string, ...string[]];
+  /** Ring thickness as a share of the avatar size. */
+  ring: number;
+  glow?: string;
+  /** Legendary rings slowly rotate. */
+  spin?: boolean;
+  badge: string;
+  /** Background behind the badge emoji (rarer frames). */
+  badgeBg?: string;
+}
+
+/** How a frame looks: rarer frames get thicker, brighter rings, a glow, and finally a rotating holographic ring. */
+export function frameLook(tier?: string | null): FrameLook | null {
+  const info = frameInfo(tier);
+  if (!info || !tier) return null;
+  if (FRAME_GRADIENTS[tier]) return { colors: FRAME_GRADIENTS[tier], ring: 0.07, badge: info.badge };
+  const a = achievementById(tier)!;
+  const [light, deep] = a.family.colors;
+  switch (a.rarity) {
+    case "common":
+      return { colors: [light, deep], ring: 0.07, badge: info.badge };
+    case "rare":
+      return { colors: [deep, light, deep, light], ring: 0.085, badge: info.badge, badgeBg: colors.white };
+    case "epic":
+      return { colors: ["#fff3b0", light, deep, "#ffd86b", deep], ring: 0.095, glow: deep, badge: info.badge, badgeBg: colors.white };
+    default:
+      return { colors: [deep, ...HOLO], ring: 0.105, glow: "#ffb800", spin: true, badge: info.badge, badgeBg: "#ffd86b" };
+  }
+}
+
+// One shared rotation drives every legendary ring on screen.
+const spin = new Animated.Value(0);
+let spinning = false;
+const rotate = spin.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] });
+
+function SpinningRing({ look, size }: { look: FrameLook; size: number }) {
+  useEffect(() => {
+    if (spinning) return;
+    spinning = true;
+    Animated.loop(
+      Animated.timing(spin, { toValue: 1, duration: 4000, easing: Easing.linear, useNativeDriver: Platform.OS !== "web" })
+    ).start();
+  }, []);
+  const big = size * 1.5;
+  return (
+    <Animated.View style={{ position: "absolute", width: big, height: big, left: -size * 0.25, top: -size * 0.25, transform: [{ rotate }] }}>
+      <LinearGradient colors={look.colors} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flex: 1 }} />
+    </Animated.View>
+  );
+}
 
 function colorFor(seed: string = ""): string {
   let h = 0;
@@ -45,10 +99,11 @@ export interface AvatarProps {
 export default function Avatar({ profile, uid, size = 40, medal = true, style }: AvatarProps) {
   const name = displayName(profile, "");
   const tier = typeof profile?.frame === "object" ? profile?.frame?.tier : profile?.frame;
-  const frame = tier && FRAMES[tier];
-  const pad = frame ? Math.max(2, Math.round(size * 0.07)) : 0;
+  const look = frameLook(tier);
+  const info = frameInfo(tier);
+  const pad = look ? Math.max(2, Math.round(size * look.ring)) : 0;
   const inner = size - pad * 2;
-  const label = frame ? `${name} · ${frame.label}` : name;
+  const label = info ? `${name} · ${info.label} frame` : name;
   const picture = profile?.photoURL ? (
     <Image
       source={{ uri: profile.photoURL }}
@@ -69,22 +124,57 @@ export default function Avatar({ profile, uid, size = 40, medal = true, style }:
       <Text style={{ color: colors.white, fontWeight: "800", fontSize: inner * 0.4 }}>{initials(name)}</Text>
     </View>
   );
+  const ringStyle = { width: size, height: size, borderRadius: size / 2 };
+  const badgeSize = Math.max(12, size * 0.34);
   return (
     <View style={[{ width: size, height: size }, style]} accessibilityRole="image" accessibilityLabel={label}>
-      {frame && FRAME_GRADIENTS[tier] ? (
-        <LinearGradient
-          colors={FRAME_GRADIENTS[tier]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={{ width: size, height: size, borderRadius: size / 2, padding: pad }}
+      {look ? (
+        <View
+          style={[
+            ringStyle,
+            look.glow && {
+              backgroundColor: look.glow,
+              shadowColor: look.glow,
+              shadowOpacity: 0.85,
+              shadowRadius: Math.max(4, size * 0.16),
+              shadowOffset: { width: 0, height: 0 },
+              elevation: 6,
+            },
+          ]}
         >
-          {picture}
-        </LinearGradient>
+          {look.spin ? (
+            <View style={[ringStyle, s.center, { overflow: "hidden" }]}>
+              <SpinningRing look={look} size={size} />
+              {picture}
+            </View>
+          ) : (
+            <LinearGradient colors={look.colors} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[ringStyle, { padding: pad }]}>
+              {picture}
+            </LinearGradient>
+          )}
+        </View>
       ) : (
         picture
       )}
-      {frame && medal && size >= 32 && (
-        <Text style={[s.medal, { fontSize: Math.max(12, size * 0.36) }]}>{frame.medal}</Text>
+      {look?.spin && size >= 56 && (
+        <Text style={[s.sparkle, { fontSize: size * 0.2, left: -size * 0.04, top: -size * 0.04 }]}>✨</Text>
+      )}
+      {look && medal && size >= 32 && (
+        <View
+          style={[
+            s.medal,
+            look.badgeBg && {
+              backgroundColor: look.badgeBg,
+              width: badgeSize * 1.45,
+              height: badgeSize * 1.45,
+              borderRadius: badgeSize,
+              borderWidth: 1.5,
+              borderColor: look.spin ? "#e8a10f" : colors.line,
+            },
+          ]}
+        >
+          <Text style={{ fontSize: badgeSize }}>{look.badge}</Text>
+        </View>
       )}
     </View>
   );
@@ -158,7 +248,9 @@ const s = StyleSheet.create({
     borderColor: colors.white,
     overflow: "hidden",
   },
-  medal: { position: "absolute", right: -4, bottom: -4 },
+  medal: { position: "absolute", right: -4, bottom: -4, alignItems: "center", justifyContent: "center" },
+  center: { alignItems: "center", justifyContent: "center" },
+  sparkle: { position: "absolute" },
   stack: { flexDirection: "row", alignItems: "center" },
   more: {
     marginLeft: -10,

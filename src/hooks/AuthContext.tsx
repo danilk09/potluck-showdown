@@ -3,6 +3,7 @@ import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { convex, getStoredToken, setStoredToken } from "../convex";
 import { primeProfile } from "./profileCache";
+import { clearReferrer, storedReferrer } from "../lib/referral";
 
 export interface User {
   uid: string;
@@ -105,7 +106,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           email,
           password,
           displayName: name,
+          referredBy: await storedReferrer(),
         });
+        await clearReferrer();
         await setStoredToken(res.sessionToken);
         setSessionTokenState(res.sessionToken);
       },
@@ -138,7 +141,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       async signInGuest(name) {
         const res = await convex.action(api.auth.signInGuest, {
           displayName: name,
+          referredBy: await storedReferrer(),
         });
+        await clearReferrer();
         await setStoredToken(res.sessionToken);
         setSessionTokenState(res.sessionToken);
       },

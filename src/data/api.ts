@@ -120,9 +120,10 @@ export async function lookupInvite(rawCode: string): Promise<any | null> {
   return await convex.query(api.potlucks.lookupByInvite, { sessionToken: await token(), code });
 }
 
-export async function joinPotluck(potluckId: string): Promise<void> {
+/** `invitedBy`: the user whose invite link was used, if any. */
+export async function joinPotluck(potluckId: string, invitedBy?: string | null): Promise<void> {
   const t = await token();
-  await convex.mutation(api.potlucks.join, { sessionToken: t, potluckId });
+  await convex.mutation(api.potlucks.join, { sessionToken: t, potluckId, ...(invitedBy ? { invitedBy } : {}) });
 }
 
 export async function leavePotluck(potluckId: string): Promise<void> {

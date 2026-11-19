@@ -20,15 +20,17 @@ export function webBaseUrl(): string | null {
  * Invite link for a code. With a web URL configured this is https://…/join/CODE
  * (works for anyone). Otherwise it's a link back into this app; in Expo Go
  * that's an exp:// URL other testers on the same network can open.
+ * `from` is the sharer's user id, so they get credit when people join through it.
  */
-export function inviteLink(code: string): string {
+export function inviteLink(code: string, from?: string | null): string {
   const path = `/join/${encodeURIComponent(code)}`;
+  const query = from ? `?from=${encodeURIComponent(from)}` : "";
   const base = webBaseUrl();
-  if (base) return `${base}${path}`;
+  if (base) return `${base}${path}${query}`;
   // In Expo Go the app's own scheme isn't registered, so link back through the dev server.
   const hostUri = Constants.expoConfig?.hostUri;
-  if (isRunningInExpoGo() && hostUri) return `exp://${hostUri}/--${path}`;
-  return Linking.createURL(path);
+  if (isRunningInExpoGo() && hostUri) return `exp://${hostUri}/--${path}${query}`;
+  return Linking.createURL(path, from ? { queryParams: { from } } : undefined);
 }
 
 export function androidAppUrl(): string | null {
@@ -51,15 +53,16 @@ export async function shareLink({
   const canShare = isNative || (typeof navigator !== "undefined" && Boolean(navigator.share));
   if (canShare) {
     try {
-      // iOS shows `url` as a link preview; Android only reads `message`.
-      const message = url && Platform.OS !== "ios" ? `${text ?? ""}\n${url}`.trim() : text ?? url;
-      const res = await Share.share({ title, message: message || '', url }, { dialogTitle: title, subject: title });
-      return res.action === Share.dismissedAction ? "cancelled" : "shared";
+      // iOS and browsers take the link separately (and show it as a preview card); Android only reads `message`.
+      const message = url && Platform.OS === "android" ? `${text ?? ""}\n${url}`.trim() : text ?? url;
+      // The Web Share API resolves with nothing, so there's no `action` to read on the web.
+      const res: any = await Share.share({ title, message: message || "", url }, { dialogTitle: title, subject: title });
+      return res?.action === Share.dismissedAction ? "cancelled" : "shared";
     } catch (err: any) {
       if (err?.name === "AbortError" || /cancel/i.test(err?.message ?? "")) return "cancelled";
     }
   }
-  await copyText(url ?? text ?? "");
+  await copyText(text && url ? `${text}\n${url}` : url ?? text ?? "");
   return "copied";
 }
 

@@ -11,6 +11,7 @@ import { Button, Dialog, EmptyState, Icon, Loading, Row, Screen, SectionTitle, S
 import { phaseOf } from '../../../lib/phase';
 import { toMillis } from '../../../lib/scoring';
 import FeedbackPrompt from '../../../components/FeedbackPrompt';
+import JoinDialog from '../../../components/JoinDialog';
 import { colors, type } from '../../../theme';
 
 const TIPS = [
@@ -31,6 +32,7 @@ export default function Home() {
   const now = useNow();
   const { data: potlucks, loading } = useMyPotlucks();
   const [guideStep, setGuideStep] = useState(-1);
+  const [joining, setJoining] = useState(false);
   // Hides the popup right away, before the server's record of it comes back.
   const [feedbackHandled, setFeedbackHandled] = useState<string[]>([]);
 
@@ -64,6 +66,7 @@ export default function Home() {
 
   return (
     <Screen inTabs>
+      <JoinDialog visible={joining} onClose={() => setJoining(false)} />
       {guideStep < 0 && feedbackFor.length > 0 && (
         <FeedbackPrompt potluckIds={feedbackFor} onDone={() => setFeedbackHandled((h) => [...h, ...feedbackFor])} />
       )}
@@ -93,7 +96,7 @@ export default function Home() {
       </Text>
       <Row gap={10} style={{ marginBottom: 24 }}>
         <Button style={{ flex: 1 }} size="lg" icon="add" title="Create Potluck" onPress={() => router.push('/create')} />
-        <Button style={{ flex: 1 }} size="lg" variant="outline" title="Join Potluck" onPress={() => router.push('/join')} />
+        <Button style={{ flex: 1 }} size="lg" variant="outline" title="Join Potluck" onPress={() => setJoining(true)} />
       </Row>
 
       {live.map((p) => (
@@ -109,7 +112,7 @@ export default function Home() {
 
       {loading ? <Loading /> : upcoming.length === 0 ? (
         <EmptyState emoji="🥘" title={potlucks.length ? 'Nothing coming up' : 'No potlucks yet'}
-          action={<Button title="Enter an invite code" onPress={() => router.push('/join')} />}>
+          action={<Button title="Enter an invite code" onPress={() => setJoining(true)} />}>
           {potlucks.length ? 'Your past showdowns are under Events. ' : ''}Create your own showdown, or join one with an invite code from a friend.
         </EmptyState>
       ) : (

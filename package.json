@@ -14,8 +14,11 @@
     "convex:dev": "convex dev",
     "convex:deploy": "convex deploy",
     "seed": "tsx scripts/seed.ts",
+    "eval:seed": "convex run evalSeed:run",
+    "eval:reset-a": "convex run evalSeed:resetPhoneA",
+    "eval:reset-b": "convex run evalSeed:resetPhoneB",
     "icons": "tsx scripts/make-icons.ts",
-    "build:web": "expo export --platform web"
+    "build:web": "expo export --platform web && tsx scripts/web-meta.ts"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.2",
@@ -37,6 +40,7 @@
     "expo-splash-screen": "~58.0.11",
     "expo-status-bar": "~58.0.4",
     "expo-system-ui": "~58.0.6",
+    "fflate": "^0.8.3",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "react-native": "0.88.0",

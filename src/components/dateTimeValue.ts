@@ -47,3 +47,51 @@ export function formatValue(mode: DateTimeMode, value?: string | null): string {
   if (mode === "time") return timeFmt.format(d);
   return `${dateFmt.format(d)} · ${timeFmt.format(d)}`;
 }
+
+/** Today as a date value ("2026-10-21"), the earliest day a new event can use. */
+export function todayValue(today: Date = new Date()): string {
+  return toValue("date", today);
+}
+
+/** Typed digits shown as a clock time: "6" → "6", "630" → "6:30", "1230" → "12:30". */
+export function formatTypedTime(text: string): string {
+  const d = text.replace(/\D/g, "").slice(0, 4);
+  if (d.length <= 2) return d;
+  return `${d.slice(0, d.length - 2)}:${d.slice(-2)}`;
+}
+
+/**
+ * Typed 12-hour time + AM/PM → "HH:mm" (24-hour), or null if it isn't a real
+ * time. One or two digits are just the hour ("6" → 6:00).
+ */
+export function parseTypedTime(text: string, pm: boolean): string | null {
+  const d = text.replace(/\D/g, "");
+  if (!d || d.length > 4) return null;
+  const [h, m] = d.length <= 2 ? [Number(d), 0] : [Number(d.slice(0, -2)), Number(d.slice(-2))];
+  if (h < 1 || h > 12 || m > 59) return null;
+  return `${pad((h % 12) + (pm ? 12 : 0))}:${pad(m)}`;
+}
+
+/** "18:30" → { text: "6:30", pm: true }, for showing a stored time in the typed field. */
+export function toTypedTime(value?: string | null): { text: string; pm: boolean } | null {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(value ?? "");
+  if (!match) return null;
+  const h = Number(match[1]);
+  return { text: `${h % 12 || 12}:${match[2]}`, pm: h >= 12 };
+}
+
+/**
+ * Like setTimePart, for a typed time: an empty or half-typed time keeps the
+ * chosen date ("2026-10-21T") so the form can ask for the time instead of
+ * silently dropping the date.
+ */
+export function setTypedTimePart(value: string | null | undefined, time: string): string {
+  if (time) return setTimePart(value, time);
+  const date = value?.split("T")[0];
+  return date ? `${date}T` : "";
+}
+
+/** A date-time with the date picked but no valid time yet. */
+export function missingTime(value?: string | null): boolean {
+  return Boolean(value?.endsWith("T"));
+}

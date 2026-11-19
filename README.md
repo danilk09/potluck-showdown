@@ -40,6 +40,10 @@ one you can vote in right now, one you can add a dish to, one you already won, a
   `you@example.com` on your phone. Changes appear live on both.
 - **Invite links while testing:** with no `EXPO_PUBLIC_WEB_URL` set, invite links and QR codes are `exp://` links
   that open the app in Expo Go on another phone on the same Wi-Fi.
+- **Invite link previews:** shared invite links show a picture card ("Come join my potluck!") in iMessage, WhatsApp,
+  Discord and similar apps once the web build is hosted. The card comes from the tags in `public/index.html` and
+  `public/og-invite.png` (regenerate it with `npm run icons`). Set `EXPO_PUBLIC_WEB_URL` before `npm run build:web`
+  so the picture gets a full URL.
 
 ## How the requirements map to the code
 

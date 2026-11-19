@@ -2,9 +2,8 @@ import { createElement } from "react";
 import { Pressable, Text, View, StyleProp, ViewStyle } from "react-native";
 import { colors } from "../theme";
 import { Label } from "./ui";
-import { setDatePart, setTimePart, DateTimeMode } from "./dateTimeValue";
-
-const INPUT_TYPE: Record<string, string> = { date: "date", time: "time" };
+import TimeInput from "./TimeInput";
+import { setDatePart, setTypedTimePart, DateTimeMode } from "./dateTimeValue";
 
 interface DateTimeFieldProps {
   label?: string;
@@ -13,11 +12,14 @@ interface DateTimeFieldProps {
   onChange: (val: string) => void;
   disabled?: boolean;
   clearable?: boolean;
+  required?: boolean;
+  /** Earliest selectable day ("YYYY-MM-DD"). */
+  minDate?: string;
   style?: StyleProp<ViewStyle>;
   placeholder?: string;
 }
 
-/** Web build: the browser's own date/time inputs (same string values as native). */
+/** Web build: the browser's calendar for dates, typed times (same string values as native). */
 export default function DateTimeField({
   label,
   mode = "date",
@@ -25,15 +27,30 @@ export default function DateTimeField({
   onChange,
   disabled,
   clearable,
+  required,
+  minDate,
   style,
 }: DateTimeFieldProps) {
-  const input = (kind: "date" | "time", part: string | undefined, change: (v: string) => void) =>
+  if (mode === "time") {
+    return <TimeInput label={label} required={required} value={value} onChange={onChange} disabled={disabled} style={style} />;
+  }
+
+  const dateInput = (part: string | undefined, change: (v: string) => void) =>
     createElement("input", {
-      type: INPUT_TYPE[kind],
+      type: "date",
       value: part ?? "",
+      min: minDate,
       disabled,
-      "aria-label": mode === "datetime" ? `${label} ${kind}` : label,
+      "aria-label": mode === "datetime" ? `${label} date` : label,
       onChange: (e: any) => change(e.target.value),
+      // Open the calendar on any click, not just on the small icon.
+      onClick: (e: any) => {
+        try {
+          e.currentTarget.showPicker?.();
+        } catch {
+          // Some browsers only allow it from certain gestures; the field still works.
+        }
+      },
       style: {
         font: "inherit",
         fontSize: 16,
@@ -49,21 +66,22 @@ export default function DateTimeField({
         WebkitAppearance: "auto",
         appearance: "auto",
         colorScheme: "light",
+        cursor: disabled ? "default" : "pointer",
       },
     });
 
   return (
     <View style={style}>
-      {label ? <Label>{label}</Label> : null}
+      {label ? <Label required={required}>{label}</Label> : null}
       {mode === "datetime" ? (
         <View style={{ gap: 8 }}>
-          {input("date", value?.split("T")[0], (date) => onChange(setDatePart(value, date)))}
-          {input("time", value?.split("T")[1], (time) => onChange(setTimePart(value, time)))}
+          {dateInput(value?.split("T")[0], (date) => onChange(setDatePart(value, date)))}
+          <TimeInput value={value?.split("T")[1]} disabled={disabled} onChange={(time) => onChange(setTypedTimePart(value, time))} />
         </View>
       ) : (
-        input(mode as "date" | "time", value ?? undefined, onChange)
+        dateInput(value ?? undefined, onChange)
       )}
-      {clearable && value && !disabled && (
+      {clearable && Boolean(value) && !disabled && (
         <Pressable
           accessibilityRole="button"
           onPress={() => onChange("")}

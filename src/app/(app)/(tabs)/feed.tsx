@@ -5,21 +5,27 @@ import { useAuth } from '../../../hooks/AuthContext';
 import { useDishes, useMyPotlucks, useMyRatings, useNow } from '../../../hooks/useFirestore';
 import { friendlyError, toggleLike } from '../../../data/api';
 import { PHASE_CHIP, PHASE_LABEL, phaseOf, Phase } from '../../../lib/phase';
+import { formatInfo } from '../../../lib/formats';
+import { formatWhen } from '../../../lib/dates';
 import { rankDishes, toMillis } from '../../../lib/scoring';
 import { tapFeedback } from '../../../lib/platform';
 import { AuthorLine } from '../../../components/Avatar';
+import JoinDialog from '../../../components/JoinDialog';
 import {
-  Button, Card, Chip, FsImage, Icon, IconButton, Loading, OptionSheet, Row, Screen, Stack, Stars, useToast,
+  Button, Card, Chip, FsImage, Icon, IconButton, Loading, OptionSheet, Row, Screen, Stack, Stars, useSinglePress, useToast,
   EmptyState,
 } from '../../../components/ui';
 import { colors, type } from '../../../theme';
 
-/** Picks the potluck people most likely want: live voting, then the next one, then the latest. */
+/**
+ * The most recent potluck: one with voting open right now, otherwise the latest one that has
+ * already started, otherwise the next one coming up.
+ */
 function defaultPotluck(potlucks: any[], now: number = Date.now()): any {
-  const byPhase = (ph: Phase) => potlucks.filter((p) => phaseOf(p, now) === ph);
-  return byPhase('voting')[0]
-    ?? byPhase('open').sort((a, b) => toMillis(a.startsAt) - toMillis(b.startsAt))[0]
-    ?? [...potlucks].sort((a, b) => toMillis(b.startsAt) - toMillis(a.startsAt))[0];
+  const voting = potlucks.filter((p) => phaseOf(p, now) === 'voting');
+  const started = potlucks.filter((p) => toMillis(p.startsAt) <= now);
+  const latest = (list: any[]) => [...list].sort((a, b) => toMillis(b.startsAt) - toMillis(a.startsAt))[0];
+  return latest(voting) ?? latest(started) ?? [...potlucks].sort((a, b) => toMillis(a.startsAt) - toMillis(b.startsAt))[0];
 }
 
 function LikeButton({ liked, count, onPress }: { liked: boolean; count: number; onPress: () => void }) {
@@ -39,7 +45,7 @@ function DishCard({ dish, potluck, phase, rated, onLike }: { dish: any; potluck:
   const liked = Boolean(dish.likedBy?.includes(user?.uid));
   const category = potluck.dishCategories?.find((c: any) => c.id === dish.categoryId);
   const detail = `/potlucks/${potluck.id}/dishes/${dish.id}`;
-  const open = () => router.push(detail as any);
+  const open = useSinglePress(() => router.push(detail as any))!;
   return (
     <Card style={{ overflow: 'hidden' }}>
       <OptionSheet visible={menu} onClose={() => setMenu(false)} title={dish.name} options={[
@@ -79,7 +85,7 @@ export default function Feed() {
   const params = useLocalSearchParams<{ pid?: string }>();
   const toast = useToast();
   const now = useNow();
-  const [picker, setPicker] = useState(false);
+  const [joining, setJoining] = useState(false);
   const { data: potlucks, loading } = useMyPotlucks();
   const pid = typeof params.pid === 'string' ? params.pid : defaultPotluck(potlucks, now)?.id;
   const potluck = potlucks.find((p) => p.id === pid);
@@ -105,30 +111,36 @@ export default function Feed() {
 
   return (
     <Screen inTabs wide>
-      <OptionSheet visible={picker} onClose={() => setPicker(false)} title="Choose potluck" options={potlucks.map((p) => ({
-        label: p.title, sub: PHASE_LABEL[phaseOf(p, now)], selected: p.id === pid, onPress: () => router.setParams({ pid: p.id }),
-      }))} />
-      <Row justify="space-between" style={{ marginBottom: 8, minHeight: 44 }}>
-        <Text style={[type.h2, { textTransform: 'uppercase' }]}>Food Feed</Text>
-        {potlucks.length > 0 && (
-          <Pressable onPress={() => setPicker(true)} accessibilityRole="button" style={{ flexDirection: 'row', alignItems: 'center', gap: 4, maxWidth: '55%' }}>
-            <Text style={[type.body, type.bold, { color: colors.coral, flexShrink: 1 }]} numberOfLines={1}>{potluck?.title ?? 'Choose potluck'}</Text>
-            <Icon name="chevron-down" size={16} color={colors.coral} />
-          </Pressable>
-        )}
-      </Row>
+      <JoinDialog visible={joining} onClose={() => setJoining(false)} />
+      <Text style={[type.h2, { textTransform: 'uppercase', marginBottom: 12 }]}>Food Feed</Text>
 
       {loading ? <Loading /> : !potluck ? (
-        <EmptyState emoji="📸" title="Nothing on the menu yet" action={<Button title="Join a potluck" onPress={() => router.push('/join')} />}>
+        <EmptyState emoji="📸" title="Nothing on the menu yet"
+          action={potlucks.length
+            ? <Button title="Choose a potluck" onPress={() => router.push('/feed-select')} />
+            : <Button title="Join a potluck" onPress={() => setJoining(true)} />}>
           {params.pid ? 'You’re not part of that potluck.' : 'Dishes from your potlucks show up here.'}
         </EmptyState>
       ) : (
         <>
-          <Row gap={12} style={{ marginBottom: 16 }}>
-            <Chip tone={PHASE_CHIP[phase] as any}>{PHASE_LABEL[phase]}</Chip>
-            <Button variant="link" size="sm" title="Event details" onPress={() => router.push(`/potlucks/${potluck.id}` as any)} />
+          <Card style={s.current}>
+            <View style={s.thumb}><FsImage src={potluck.coverImage} fallback={formatInfo(potluck.format).emoji} /></View>
+            <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+              <Text style={[type.small, type.muted]}>Showing dishes from</Text>
+              <Text style={[type.body, type.heavy]} numberOfLines={1}>{potluck.title}</Text>
+              <Row gap={6} wrap>
+                <Chip tone={PHASE_CHIP[phase] as any}>{PHASE_LABEL[phase]}</Chip>
+                <Text style={[type.small, type.muted]}>{formatWhen(potluck.startsAt)}</Text>
+              </Row>
+            </View>
+            <Button size="sm" variant="soft" icon="swap-horizontal" title="Change"
+              accessibilityLabel="Choose a different potluck"
+              onPress={() => router.push({ pathname: '/feed-select', params: { pid: potluck.id } })} />
+          </Card>
+          <Row gap={16} style={{ marginBottom: 16 }}>
+            <Button variant="link" size="sm" icon="information-circle-outline" title="Event details" onPress={() => router.push(`/potlucks/${potluck.id}` as any)} />
             {phase === 'closed' && (
-              <Button variant="link" size="sm" title="Leaderboard" iconRight="chevron-forward" style={{ marginLeft: 'auto' }}
+              <Button variant="link" size="sm" icon="trophy-outline" title="Leaderboard"
                 onPress={() => router.push(`/potlucks/${potluck.id}/results` as any)} />
             )}
           </Row>
@@ -154,6 +166,8 @@ export default function Feed() {
 
 const s = StyleSheet.create({
   photo: { aspectRatio: 16 / 10, backgroundColor: colors.peachSoft },
+  current: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 10, marginBottom: 8 },
+  thumb: { width: 56, height: 56, borderRadius: 12, overflow: 'hidden' },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 14 },
   cell: { flexGrow: 1, flexBasis: 320, maxWidth: '100%' },
 });

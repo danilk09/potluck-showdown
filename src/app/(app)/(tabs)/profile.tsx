@@ -5,14 +5,15 @@ import { authErrorMessage, useAuth } from '../../../hooks/AuthContext';
 import Constants from 'expo-constants';
 import { useMyPotlucks, useRecipeBank } from '../../../hooks/useFirestore';
 import { friendlyError, updateMyProfile } from '../../../data/api';
-import { FRAMES, FRAME_ORDER, earnedFrames, winCount } from '../../../lib/frames';
+import { FRAMES, earnedFrames, winCount } from '../../../lib/frames';
+import { frameInfo } from '../../../lib/achievements';
+import { FrameSummary, useFrames } from '../../../components/FrameCollection';
 import { compressImage, pickImage } from '../../../lib/images';
 import { formatDate } from '../../../lib/dates';
-import { toMillis } from '../../../lib/scoring';
 import { androidAppUrl, isNative } from '../../../lib/platform';
 import Avatar from '../../../components/Avatar';
 import {
-  Banner, Button, Card, Chip, Dialog, Icon, IconButton, Input, ListRow, OptionSheet, PageHeader, Row, Screen, Stack, Tile, useConfirm, useToast,
+  Banner, Button, Card, Chip, Dialog, Icon, IconButton, Input, ListRow, OptionSheet, PageHeader, Row, Screen, Stack, Tile, useConfirm, useFormError, useToast,
 } from '../../../components/ui';
 import { colors, shadow, type } from '../../../theme';
 
@@ -21,20 +22,24 @@ function UpgradeGuest() {
   const toast = useToast();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
+  const [problemEl, showProblem] = useFormError();
+  const [checked, setChecked] = useState(false);
   const [busy, setBusy] = useState(false);
   const submit = async () => {
-    if (password.length < 8) {
-      setError('Use at least 8 characters.');
+    if (busy) return;
+    const missing = [!email.trim() && 'Email', !password && 'Password'].filter(Boolean) as string[];
+    const problems = password && password.length < 8 ? ['Use at least 8 characters for your password.'] : [];
+    if (missing.length || problems.length) {
+      setChecked(true);
+      showProblem({ missing, problems });
       return;
     }
     setBusy(true);
-    setError('');
     try {
       await upgradeGuest(email.trim(), password);
       toast('Account saved! You can now sign in anywhere.');
     } catch (err) {
-      setError(authErrorMessage(err));
+      showProblem({ title: 'Couldn’t save your account', message: authErrorMessage(err) });
     } finally {
       setBusy(false);
     }
@@ -46,12 +51,12 @@ function UpgradeGuest() {
         It only lives on this device. Save it as an account to keep your potlucks and recipes, sign in anywhere, and host your own showdowns.
       </Text>
       <Stack gap={8}>
-        {error ? <Banner>{error}</Banner> : null}
-        <Input placeholder="Email" accessibilityLabel="Email" value={email} onChangeText={setEmail} autoComplete="email"
+        {problemEl}
+        <Input placeholder="Email *" accessibilityLabel="Email, required" invalid={checked && !email.trim()} value={email} onChangeText={setEmail} autoComplete="email"
           keyboardType="email-address" autoCapitalize="none" autoCorrect={false} />
-        <Input placeholder="Password (8+ characters)" accessibilityLabel="Password" value={password} onChangeText={setPassword}
+        <Input placeholder="Password (8+ characters) *" accessibilityLabel="Password, required" invalid={checked && password.length < 8} value={password} onChangeText={setPassword}
           secureTextEntry autoComplete="new-password" />
-        <Button title={busy ? 'Saving…' : 'Save my account'} loading={busy} disabled={!email.trim()} onPress={submit} />
+        <Button title={busy ? 'Saving…' : 'Save my account'} loading={busy} onPress={submit} />
       </Stack>
     </Tile>
   );
@@ -105,14 +110,7 @@ export default function Profile() {
   const uid = user?.uid || '';
 
   const earned = useMemo(() => earnedFrames(uid, potlucks), [uid, potlucks]);
-  // Most recent potluck backing each tier
-  const bestByTier = useMemo(() => {
-    const map: Record<string, any> = {};
-    for (const f of [...earned].sort((a, b) => toMillis(b.potluck.startsAt) - toMillis(a.potluck.startsAt))) {
-      map[f.tier] ??= f;
-    }
-    return map;
-  }, [earned]);
+  const frames = useFrames();
   const trophies = earned.filter((f) => f.tier !== 'host');
   const dishesShared = recipes.filter((r) => r.authorId === uid).length;
 
@@ -152,11 +150,6 @@ export default function Profile() {
     if (await run('name', () => updateMyProfile({ displayName: trimmed.slice(0, 40) }), 'Name updated')) setName(null);
   };
 
-  const chooseFrame = (tier: string | null) => {
-    const frame = tier ? { tier, potluckId: bestByTier[tier].potluckId } : null;
-    run(`frame-${tier}`, () => updateMyProfile({ frame }), tier ? `${FRAMES[tier].label} frame equipped` : 'Frame removed');
-  };
-
   const onSignOut = async () => {
     if (!isGuest || await confirm({
       title: 'Sign out of your guest pass?',
@@ -167,8 +160,6 @@ export default function Profile() {
       signOut();
     }
   };
-
-  const frameOptions: { tier: string | null }[] = [{ tier: null }, ...FRAME_ORDER.map((tier) => ({ tier }))];
 
   return (
     <Screen inTabs>
@@ -203,7 +194,7 @@ export default function Profile() {
         <Text style={[type.small, type.muted, { marginTop: 2 }]}>{isGuest ? 'Guest' : user?.email}</Text>
         {profile?.frame && (
           <View style={{ marginTop: 8 }}>
-            <Chip tone="gold">{`${FRAMES[profile.frame.tier]?.medal} ${FRAMES[profile.frame.tier]?.label}`}</Chip>
+            <Chip tone="gold">{`${frameInfo(profile.frame.tier)?.badge ?? ''} ${frameInfo(profile.frame.tier)?.label ?? ''}`}</Chip>
           </View>
         )}
         <Row gap={8} style={{ marginTop: 16, alignSelf: 'stretch' }}>
@@ -232,36 +223,11 @@ export default function Profile() {
         <ListRow icon="chatbubble-outline" iconColor={colors.coral} label="Give feedback" sub="Help make Potluck Showdown better" onPress={() => router.push('/feedback' as any)} last />
       </Card>
 
-      <Text style={[type.h3, { marginBottom: 4 }]}>Profile frame</Text>
+      <Text style={[type.h3, { marginBottom: 4 }]}>Profile frames</Text>
       <Text style={[type.small, type.muted, { marginBottom: 10 }]}>
-        Profiles are private, but everyone sees your picture in feeds and guest lists. Win a showdown to unlock a frame and show it off.
+        Profiles are private, but everyone sees your picture in feeds and guest lists. Collect frames by hosting, cooking, voting, winning and inviting friends.
       </Text>
-      <View style={s.frames}>
-        {frameOptions.map(({ tier }) => {
-          const unlocked = !tier || Boolean(bestByTier[tier]);
-          const active = (profile?.frame?.tier ?? null) === tier;
-          return (
-            <Pressable
-              key={tier ?? 'none'}
-              onPress={() => unlocked && !active && chooseFrame(tier)}
-              disabled={!unlocked || Boolean(busy)}
-              accessibilityRole="button"
-              accessibilityState={{ selected: active, disabled: !unlocked }}
-              style={[s.frame, active && s.frameActive, !unlocked && { opacity: 0.55 }]}
-            >
-              <Avatar uid={uid} profile={{ ...profile, frame: tier ? { tier } : null }} size={56} />
-              <Text style={[type.small, type.bold, { marginTop: 8, textAlign: 'center' }]}>
-                {tier ? FRAMES[tier].label : 'No frame'}{!unlocked ? ' 🔒' : ''}
-              </Text>
-              {tier && (
-                <Text style={[type.small, type.muted, { textAlign: 'center' }]}>
-                  {unlocked ? (active ? 'Equipped' : 'Tap to equip') : FRAMES[tier].desc}
-                </Text>
-              )}
-            </Pressable>
-          );
-        })}
-      </View>
+      <FrameSummary frames={frames} onOpen={() => router.push('/frames' as any)} />
 
       {trophies.length > 0 && (
         <>

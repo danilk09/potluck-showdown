@@ -10,8 +10,8 @@ import { phaseOf } from '../../../../lib/phase';
 import Avatar from '../../../../components/Avatar';
 import PhotoPicker from '../../../../components/PhotoPicker';
 import {
-  Banner, Button, Card, Checkbox, ChipToggleGroup, EmptyState, Field, Hint, Input, Label, LoadingScreen, PageHeader, Row, Screen,
-  SelectField, Stack, Tile, useConfirm, useToast,
+  Button, Card, Checkbox, ChipToggleGroup, EmptyState, Field, Hint, Input, Label, LoadingScreen, PageHeader, RequiredNote, Row, Screen,
+  SelectField, Stack, Tile, useConfirm, useFormError, useToast,
 } from '../../../../components/ui';
 import { colors, type } from '../../../../theme';
 
@@ -37,13 +37,15 @@ function fromDish(d: any) {
     ...blank,
     ...d,
     ingredients: (d.ingredients ?? []).join('\n'),
+    // Older dishes stored text like "6 people"; the field now takes just the number.
+    serves: String(d.serves ?? '').match(/\d+/)?.[0] ?? '',
     prepMinutes: d.prepMinutes != null ? String(d.prepMinutes) : '',
     calories: d.calories != null ? String(d.calories) : '',
   };
 }
 
 export default function DishForm() {
-  const { pid, did } = useLocalSearchParams<{ pid: string; did?: string }>();
+  const { pid, did, cat } = useLocalSearchParams<{ pid: string; did?: string; cat?: string }>();
   const { user } = useAuth();
   const { data: potluck, loading } = usePotluck(pid);
   const uid = user?.uid || '';
@@ -64,16 +66,23 @@ export default function DishForm() {
   }
   const existing = did ? dishes.find((d: any) => d.id === did && d.authorId === uid) : null;
   if (did && !existing) return <Screen><PageHeader title="Edit dish" /><EmptyState title="Dish not found" /></Screen>;
-  return <DishEditor key={existing?.id ?? 'new'} potluck={potluck} dishes={dishes} existing={existing} />;
+  return <DishEditor key={existing?.id ?? 'new'} potluck={potluck} dishes={dishes} existing={existing} categoryId={cat} />;
 }
 
-function DishEditor({ potluck, dishes, existing }: { potluck: any; dishes: any[]; existing: any }) {
+function DishEditor({ potluck, dishes, existing, categoryId }: { potluck: any; dishes: any[]; existing: any; categoryId?: string }) {
   const pid = potluck.id;
   const { user, profile } = useAuth();
   const toast = useToast();
   const [confirmEl, confirm] = useConfirm();
-  const [form, setForm] = useState(() => (existing ? fromDish(existing) : { ...blank }));
-  const [error, setError] = useState('');
+  const [form, setForm] = useState(() => {
+    if (existing) return fromDish(existing);
+    // Opened from a category's "Claim" button: start with that category picked.
+    const valid = potluck.dishCategories.some((c: any) => c.id === categoryId);
+    return { ...blank, categoryId: valid ? categoryId! : '' };
+  });
+  const [problemEl, showProblem] = useFormError();
+  // Set after a submit attempt, so empty required fields show a red outline.
+  const [checked, setChecked] = useState(false);
   const [busy, setBusy] = useState(false);
   const [extraAllergen, setExtraAllergen] = useState('');
   const [extraDietary, setExtraDietary] = useState('');
@@ -88,15 +97,14 @@ function DishEditor({ potluck, dishes, existing }: { potluck: any; dishes: any[]
   const aiCategories = potluck.scoring.filter((c: any) => c.mode === 'ai');
 
   const missing = [
-    !form.name.trim() && 'dish name',
-    !form.categoryId && 'category',
-    !form.ingredients.trim() && 'ingredients',
-    needsRequired && !form.usedRequired && 'required-ingredient check',
+    !form.name.trim() && 'Dish name',
+    !form.categoryId && (potluck.format === 'courses' ? 'Bracket' : 'Category'),
+    !form.ingredients.trim() && 'Ingredients',
+    needsRequired && !form.usedRequired && 'Confirm you used every required ingredient',
   ].filter(Boolean) as string[];
 
   const persist = async (aiScores?: Record<string, number>) => {
     setBusy(true);
-    setError('');
     try {
       const payload = aiScores
         ? { ...form, aiScores: { ...existing?.aiScores, ...aiScores } }
@@ -106,7 +114,7 @@ function DishEditor({ potluck, dishes, existing }: { potluck: any; dishes: any[]
       router.back();
     } catch (err) {
       setCalc(null);
-      setError(friendlyError(err));
+      showProblem({ title: 'Couldn’t save your dish', message: friendlyError(err) });
       setBusy(false);
     }
   };
@@ -114,7 +122,8 @@ function DishEditor({ potluck, dishes, existing }: { potluck: any; dishes: any[]
   const submit = () => {
     if (calc) return;
     if (missing.length) {
-      setError(`Please add: ${missing.join(', ')}.`);
+      setChecked(true);
+      showProblem({ missing });
       return;
     }
     if (aiCategories.length) {
@@ -131,7 +140,7 @@ function DishEditor({ potluck, dishes, existing }: { potluck: any; dishes: any[]
       toast('Dish removed');
       router.back();
     } catch (err) {
-      setError(friendlyError(err));
+      showProblem({ title: 'Couldn’t remove your dish', message: friendlyError(err) });
     }
   };
 
@@ -180,13 +189,15 @@ function DishEditor({ potluck, dishes, existing }: { potluck: any; dishes: any[]
         {potluck.formatDetail ? <Text style={[type.small, { marginTop: 8 }]}><Text style={type.bold}>{fmt.detailLabel}:</Text> {potluck.formatDetail}</Text> : null}
       </Tile>
 
-      {error ? <Banner style={{ marginBottom: 12 }}>{error}</Banner> : null}
+      {problemEl}
+      <RequiredNote style={{ marginBottom: 12 }} />
       <Stack gap={16}>
-        <Field label="Dish name" {...field('name')} maxLength={80} placeholder="Spicy sesame noodles" />
+        <Field label="Dish name" required invalid={checked && !form.name.trim()} {...field('name')} maxLength={80} placeholder="Spicy sesame noodles" />
         <Row gap={12} align="flex-start">
           <SelectField
             style={{ flex: 7 }}
             label={potluck.format === 'courses' ? 'Bracket' : 'Category'}
+            required
             value={form.categoryId}
             onChange={(v) => set('categoryId', v)}
             options={potluck.dishCategories.map((c: any) => {
@@ -194,13 +205,14 @@ function DishEditor({ potluck, dishes, existing }: { potluck: any; dishes: any[]
               return { value: c.id, label: c.name, sub: left > 0 ? `${left} needed` : 'Full' };
             })}
           />
-          <Field style={{ flex: 5 }} label="Serves" {...field('serves')} maxLength={40} placeholder="8–10 people" />
+          <Field style={{ flex: 5 }} label="Serves (people)" keyboardType="number-pad" inputMode="numeric" maxLength={3} placeholder="8"
+            value={form.serves} onChangeText={(v) => set('serves', v.replace(/\D/g, ''))} />
         </Row>
 
         <PhotoPicker title="Add a photo of your dish" current={form.photo} pending={form.photoData}
           onPick={(d) => set('photoData', d)} onRemove={() => setForm((f: any) => ({ ...f, photo: null, photoData: null }))} />
 
-        <Field label="Ingredients" {...field('ingredients')} rows={4}
+        <Field label="Ingredients" required invalid={checked && !form.ingredients.trim()} {...field('ingredients')} rows={4}
           placeholder={'One per line, or separated by commas\n8 oz wheat noodles\n2 tbsp sesame paste'} />
         {needsRequired && (
           <Tile tone="gold" style={{ padding: 14 }}>
@@ -255,7 +267,7 @@ function DishEditor({ potluck, dishes, existing }: { potluck: any; dishes: any[]
 
         {missing.length === 0
           ? <Tile tone="mint" style={{ paddingVertical: 10, paddingHorizontal: 14 }}><Text style={[type.small, { color: colors.mintDark }]}>✓ All required details are complete.</Text></Tile>
-          : <Hint>Still needed: {missing.join(', ')}.</Hint>}
+          : <Hint>Still needed: {missing.join(', ').toLowerCase()}.</Hint>}
 
         {existing && <Button variant="linkDanger" title="Remove my dish" onPress={remove} />}
       </Stack>

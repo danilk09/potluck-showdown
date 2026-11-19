@@ -13,6 +13,8 @@ import { weightsTotal } from "../lib/scoring";
 import { phaseOf } from "../lib/phase";
 import { toInputDate, toInputDateTime, toInputTime } from "../lib/dates";
 import DateTimeField from "./DateTimeField";
+import { missingTime, todayValue } from "./dateTimeValue";
+import { localDateTime } from "../data/builders";
 import { HealthScoreModal } from "./HealthScoreMeter";
 import PhotoPicker from "./PhotoPicker";
 import {
@@ -28,10 +30,14 @@ import {
   LoadingScreen,
   OptionSheet,
   PageHeader,
+  RequiredNote,
   Row,
   Screen,
   Stack,
+  hasProblem,
+  useFormError,
   useToast,
+  type FormProblem,
 } from "./ui";
 import { colors, type } from "../theme";
 
@@ -163,7 +169,9 @@ function PotluckEditor({ existing, userId }: { existing: any; userId: string }) 
   const [codeTouched, setCodeTouched] = useState(false);
   const [addMenu, setAddMenu] = useState(false);
   const [scorePreview, setScorePreview] = useState<string | null>(null);
-  const [error, setError] = useState("");
+  // Set after a submit attempt, so empty required fields show a red outline.
+  const [checked, setChecked] = useState(false);
+  const [problemEl, showProblem] = useFormError();
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -244,7 +252,7 @@ function PotluckEditor({ existing, userId }: { existing: any; userId: string }) 
     setForm({ ...blankForm(), ...draft.form });
     setDraftDirty(false);
     setStep(1);
-    setError("");
+    setChecked(false);
   };
 
   const newDraft = () => {
@@ -252,7 +260,7 @@ function PotluckEditor({ existing, userId }: { existing: any; userId: string }) 
     setForm(blankForm());
     setDraftDirty(false);
     setStep(1);
-    setError("");
+    setChecked(false);
   };
 
   const removeDraft = async () => {
@@ -265,39 +273,67 @@ function PotluckEditor({ existing, userId }: { existing: any; userId: string }) 
     newDraft();
   };
 
-  const validateStep1 = () => {
-    if (!form.title.trim()) return "Give your challenge a title.";
-    if (!form.date || !form.time) return "Pick a date and time.";
-    if (fmt.detailLabel && !form.formatDetail.trim())
-      return `Add the ${fmt.detailLabel.toLowerCase()} for this format.`;
-    if (!editing && !isValidInviteCode(normalizeInviteCode(form.inviteCode)))
-      return "Invite codes use 4–20 letters, numbers, or dashes.";
-    if (form.scoring.some((c: any) => !c.name.trim())) return "Every scoring category needs a name.";
-    if (total < 100) return `Your scoring weights only add up to ${total}%. Move the sliders so they total 100% before continuing.`;
-    if (total > 100) return `Your scoring weights add up to ${total}%. Lower a slider so they total exactly 100%.`;
-    return "";
+  // An existing event keeps its date even if it has passed; new or changed dates must be today or later.
+  const dateChanged = !editing || form.date !== toInputDate(existing.startsAt);
+  const validateStep1 = (): FormProblem => {
+    const missing: string[] = [];
+    const problems: string[] = [];
+    if (!form.title.trim()) missing.push("Challenge title");
+    if (!form.date) missing.push("Date");
+    if (!form.time) missing.push("Time (type it like 6:30)");
+    if (fmt.detailLabel && !form.formatDetail.trim()) missing.push(fmt.detailLabel);
+    if (!editing && !form.inviteCode.trim()) missing.push("Invite code");
+    const unnamed = form.scoring.filter((c: any) => !c.name.trim()).length;
+    if (unnamed) missing.push(unnamed === 1 ? "Scoring category name" : `${unnamed} scoring category names`);
+
+    if (form.date && dateChanged && form.date < todayValue()) problems.push("The date has passed. Pick today or a later date.");
+    else if (form.date && form.time && dateChanged && (localDateTime(form.date, form.time)?.getTime() ?? 0) < Date.now())
+      problems.push("That start time has already passed. Pick a later time.");
+    if (!editing && form.inviteCode.trim() && !isValidInviteCode(normalizeInviteCode(form.inviteCode)))
+      problems.push("Invite codes use 4–20 letters, numbers, or dashes.");
+    if (total !== 100) problems.push(`Scoring weights add up to ${total}%. Move the sliders so they total exactly 100%.`);
+    return { missing, problems };
   };
 
-  const validateStep2 = () => {
-    if (!form.dishCategories.some((c: any) => c.name.trim())) return "Add at least one dish category.";
+  const validateStep2 = (): FormProblem => {
+    const missing: string[] = [];
+    const problems: string[] = [];
+    if (!form.dishCategories.some((c: any) => c.name.trim())) missing.push("At least one dish category");
+    if (missingTime(form.votingOpensAt)) missing.push("Time voting opens (type it like 7:00)");
+    if (missingTime(form.votingClosesAt)) missing.push("Time voting closes (type it like 9:00)");
     if (form.votingOpensAt && form.votingClosesAt && form.votingClosesAt <= form.votingOpensAt)
-      return "Voting must close after it opens.";
+      problems.push("Voting must close after it opens.");
     const guests = parseInt(form.maxGuests, 10);
     if (editing && guests && guests < existing.memberIds.length)
-      return `There are already ${existing.memberIds.length} people going.`;
-    return "";
+      problems.push(`The guest limit is below the ${existing.memberIds.length} people already going.`);
+    return { missing, problems };
   };
 
   const next = () => {
-    const msg = validateStep1();
-    setError(msg);
-    if (!msg) setStep(2);
+    const problem = validateStep1();
+    if (hasProblem(problem)) {
+      setChecked(true);
+      showProblem(problem);
+      return;
+    }
+    setStep(2);
   };
 
   const submit = async () => {
-    const msg = validateStep1() || validateStep2();
-    setError(msg);
-    if (msg) return;
+    const first = validateStep1();
+    if (hasProblem(first)) {
+      // Something on the first page needs fixing (a start time can pass while you fill in page 2).
+      setChecked(true);
+      setStep(1);
+      showProblem(first);
+      return;
+    }
+    const second = validateStep2();
+    if (hasProblem(second)) {
+      setChecked(true);
+      showProblem(second);
+      return;
+    }
     setBusy(true);
     try {
       if (editing) {
@@ -311,7 +347,7 @@ function PotluckEditor({ existing, userId }: { existing: any; userId: string }) 
         router.replace({ pathname: "/potlucks/[pid]", params: { pid: id, invite: "new" } } as any);
       }
     } catch (err: any) {
-      setError(friendlyError(err));
+      showProblem({ title: editing ? "Couldn’t save your changes" : "Couldn’t create the potluck", message: friendlyError(err) });
       setBusy(false);
     }
   };
@@ -375,12 +411,15 @@ function PotluckEditor({ existing, userId }: { existing: any; userId: string }) 
       <Text style={s.step}>
         {step === 1 ? "Challenge setup" : "Dishes & voting"} · {step} of 2
       </Text>
-      {error ? <Banner style={{ marginBottom: 12 }}>{error}</Banner> : null}
+      {problemEl}
+      <RequiredNote style={{ marginBottom: 12 }} />
 
       {step === 1 ? (
         <Stack gap={16}>
           <Field
             label="Challenge title"
+            required
+            invalid={checked && !form.title.trim()}
             value={form.title}
             onChangeText={(title) => {
               editForm((f) => ({
@@ -396,20 +435,22 @@ function PotluckEditor({ existing, userId }: { existing: any; userId: string }) 
           />
           <Row gap={12} align="flex-start">
             <DateTimeField
-              style={{ flex: 7 }}
+              style={{ flex: 1 }}
               label="Date"
+              required
               mode="date"
               value={form.date}
+              minDate={todayValue()}
               onChange={(v) => set("date", v)}
               placeholder="Pick a date"
             />
             <DateTimeField
-              style={{ flex: 5 }}
+              style={{ flex: 1 }}
               label="Time"
+              required
               mode="time"
               value={form.time}
               onChange={(v) => set("time", v)}
-              placeholder="Pick a time"
             />
           </Row>
           <Field label="Location" {...field("location")} maxLength={160} placeholder="Hawthorne Hall rooftop" />
@@ -438,6 +479,8 @@ function PotluckEditor({ existing, userId }: { existing: any; userId: string }) 
           {fmt.detailLabel && (
             <Field
               label={fmt.detailLabel}
+              required
+              invalid={checked && !form.formatDetail.trim()}
               {...field("formatDetail")}
               maxLength={300}
               placeholder={fmt.detailPlaceholder}
@@ -454,11 +497,12 @@ function PotluckEditor({ existing, userId }: { existing: any; userId: string }) 
 
           {!editing && (
             <View>
-              <Label>Invite code</Label>
+              <Label required>Invite code</Label>
               <Row gap={8}>
                 <Input
                   style={[{ flex: 1 }, type.code]}
                   value={form.inviteCode}
+                  invalid={checked && !isValidInviteCode(normalizeInviteCode(form.inviteCode))}
                   autoCapitalize="characters"
                   autoCorrect={false}
                   accessibilityLabel="Invite code"
@@ -479,7 +523,9 @@ function PotluckEditor({ existing, userId }: { existing: any; userId: string }) 
 
           <View>
             <Row justify="space-between" style={{ marginBottom: 6 }}>
-              <Text style={[type.body, type.bold]}>Scoring categories</Text>
+              <Text style={[type.body, type.bold]}>
+                Scoring categories <Text style={{ color: colors.danger }}>*</Text>
+              </Text>
               <Text style={[type.small, type.bold, { color: total === 100 ? colors.mint : colors.danger }]}>
                 {total}% of 100%
               </Text>
@@ -624,7 +670,8 @@ function PotluckEditor({ existing, userId }: { existing: any; userId: string }) 
         <Stack gap={16}>
           <View>
             <Text style={[type.body, type.bold, { marginBottom: 2 }]}>
-              {form.format === "courses" ? "Course brackets" : "Dish categories"}
+              {form.format === "courses" ? "Course brackets" : "Dish categories"}{" "}
+              <Text style={{ color: colors.danger }}>*</Text>
             </Text>
             <Text style={[type.small, type.muted, { marginBottom: 8 }]}>
               Guests claim a spot when they add their dish.{" "}
@@ -701,6 +748,7 @@ function PotluckEditor({ existing, userId }: { existing: any; userId: string }) 
               <DateTimeField
                 label="Voting opens"
                 mode="datetime"
+                minDate={todayValue()}
                 clearable
                 value={form.votingOpensAt}
                 disabled={scoringLocked}
@@ -709,6 +757,7 @@ function PotluckEditor({ existing, userId }: { existing: any; userId: string }) 
               <DateTimeField
                 label="Voting closes"
                 mode="datetime"
+                minDate={todayValue()}
                 clearable
                 value={form.votingClosesAt}
                 onChange={(v) => set("votingClosesAt", v)}

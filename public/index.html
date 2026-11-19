@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="%LANG_ISO_CODE%">
+  <head>
+    <meta charset="utf-8" />
+    <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+    <title>%WEB_TITLE%</title>
+    <!--
+      Link preview shown when an invite link is pasted into iMessage, WhatsApp, Discord, Slack, etc.
+      `npm run build:web` turns the image path into a full URL using EXPO_PUBLIC_WEB_URL (scripts/web-meta.ts).
+    -->
+    <meta name="description" content="Come join my potluck! Bring a dish, rate everyone’s food, and help crown the winner. Join right in your browser, no app needed." />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Potluck Showdown" />
+    <meta property="og:title" content="You’re invited to a Potluck Showdown 🍲" />
+    <meta property="og:description" content="Come join my potluck! Bring a dish, rate everyone’s food, and help crown the winner. No app needed." />
+    <meta property="og:image" content="/og-invite.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="You're invited: come join my potluck!" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content="/og-invite.png" />
+    <!-- The `react-native-web` recommended style reset: https://necolas.github.io/react-native-web/docs/setup/#root-element -->
+    <style id="expo-reset">
+      /* These styles make the body full-height */
+      html,
+      body {
+        height: 100%;
+      }
+      /* These styles disable body scrolling if you are using <ScrollView> */
+      body {
+        overflow: hidden;
+      }
+      /* These styles make the root element full-height */
+      #root {
+        display: flex;
+        height: 100%;
+        flex: 1;
+      }
+    </style>
+  </head>
+
+  <body>
+    <noscript> You need to enable JavaScript to run this app. </noscript>
+    <!-- The root element for your Expo app. -->
+    <div id="root"></div>
+  </body>
+</html>

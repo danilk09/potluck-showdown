@@ -8,6 +8,7 @@ import { formatInfo } from "../lib/formats";
 import { formatTime, formatWhen } from "../lib/dates";
 import { PHASE_LABEL, phaseOf } from "../lib/phase";
 import { androidAppUrl, isWeb } from "../lib/platform";
+import { rememberReferrer } from "../lib/referral";
 import { AuthorLine } from "./Avatar";
 import PrizeList from "./PrizeList";
 import {
@@ -24,20 +25,29 @@ import {
   Screen,
   Stack,
   Tile,
+  useFormError,
 } from "./ui";
 import { colors, type } from "../theme";
 
 /** Shown to signed-out visitors (usually opening an invite link). */
-function InviteGate({ code }: { code: string }) {
+function InviteGate({ code, from }: { code: string; from?: string }) {
   const { signInGuest } = useAuth();
   const [name, setName] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const next = code ? `/join/${code}` : "/join";
+  const [problemEl, showProblem] = useFormError();
+  const [checked, setChecked] = useState(false);
+  // Keep `from` so the person who shared the link still gets credit after signing in.
+  const next = code ? `/join/${code}${from ? `?from=${encodeURIComponent(from)}` : ""}` : "/join";
   const appUrl = androidAppUrl();
 
   const joinAsGuest = async () => {
-    if (!name.trim()) return;
+    if (busy) return;
+    if (!name.trim()) {
+      setChecked(true);
+      showProblem({ missing: ["Your name"] });
+      return;
+    }
     setBusy(true);
     setError("");
     try {
@@ -72,7 +82,8 @@ function InviteGate({ code }: { code: string }) {
           No account needed. Join as a guest to claim a dish, browse recipes, and vote.
         </Text>
         {error ? <Banner style={{ marginBottom: 10 }}>{error}</Banner> : null}
-        <Label>Your name</Label>
+        {problemEl}
+        <Label required>Your name</Label>
         <Row gap={8}>
           <Input
             style={{ flex: 1 }}
@@ -80,11 +91,12 @@ function InviteGate({ code }: { code: string }) {
             value={name}
             onChangeText={setName}
             placeholder="How others will see you"
+            invalid={checked && !name.trim()}
             accessibilityLabel="Your name"
             returnKeyType="go"
             onSubmitEditing={joinAsGuest}
           />
-          <Button title="Continue" loading={busy} disabled={!name.trim()} onPress={joinAsGuest} />
+          <Button title="Continue" loading={busy} onPress={joinAsGuest} />
         </Row>
         <Text style={[type.small, type.muted, { marginTop: 8 }]}>
           Guest passes live on this device. Save an account from your profile any time to keep them.
@@ -208,7 +220,7 @@ function Preview({ potluck, onJoin, busy }: { potluck: any; onJoin: () => void; 
   );
 }
 
-export default function JoinScreen({ codeParam }: { codeParam?: string }) {
+export default function JoinScreen({ codeParam, from }: { codeParam?: string; from?: string }) {
   const { user, loading } = useAuth();
   const [code, setCode] = useState(normalizeInviteCode(codeParam ?? ""));
   const [potluck, setPotluck] = useState<any>(null);
@@ -229,6 +241,11 @@ export default function JoinScreen({ codeParam }: { codeParam?: string }) {
     }
   }, []);
 
+  // Someone opening a shared link before they have an account: remember who shared it.
+  useEffect(() => {
+    if (user === null && from) rememberReferrer(from);
+  }, [user, from]);
+
   useEffect(() => {
     if (user && codeParam) {
       const t = setTimeout(() => lookup(codeParam), 0);
@@ -243,10 +260,10 @@ export default function JoinScreen({ codeParam }: { codeParam?: string }) {
   };
 
   const join = async () => {
-    if (!potluck) return;
+    if (!potluck || busy) return;
     setBusy(true);
     try {
-      await joinPotluck(potluck.id);
+      await joinPotluck(potluck.id, from);
       router.replace(`/potlucks/${potluck.id}` as any);
     } catch (err: any) {
       setError(friendlyError(err));
@@ -260,7 +277,7 @@ export default function JoinScreen({ codeParam }: { codeParam?: string }) {
     <Screen>
       <PageHeader title="Join Potluck" backTo={user ? "/" : "/welcome"} />
       {!user ? (
-        <InviteGate code={normalizeInviteCode(codeParam ?? "")} />
+        <InviteGate code={normalizeInviteCode(codeParam ?? "")} from={from} />
       ) : (
         <Stack gap={12}>
           <View>
@@ -270,7 +287,7 @@ export default function JoinScreen({ codeParam }: { codeParam?: string }) {
             </Text>
           </View>
           <View>
-            <Label>Invite code</Label>
+            <Label required>Invite code</Label>
             <Row gap={8}>
               <Input
                 style={[{ flex: 1 }, type.code]}

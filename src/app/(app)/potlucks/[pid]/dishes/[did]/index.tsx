@@ -9,6 +9,7 @@ import { healthPoints } from '../../../../../../lib/healthScore';
 import { phaseOf } from '../../../../../../lib/phase';
 import { categoryAverage, overallScore } from '../../../../../../lib/scoring';
 import { formatDate } from '../../../../../../lib/dates';
+import { formatServes } from '../../../../../../lib/formats';
 import { shareLink, tapFeedback } from '../../../../../../lib/platform';
 import { AuthorLine } from '../../../../../../components/Avatar';
 import {
@@ -99,7 +100,7 @@ export default function DishDetail() {
         </View>
         <Row gap={0} style={{ borderTopWidth: 1, borderTopColor: colors.line }}>
           {[
-            ['Serves', dish.serves || '—'],
+            ['Serves', formatServes(dish.serves)],
             ['Prep', dish.prepMinutes != null ? `${dish.prepMinutes} min` : '—'],
             ['Calories', dish.calories != null ? `${dish.calories} kcal` : '—'],
           ].map(([label, value], i) => (

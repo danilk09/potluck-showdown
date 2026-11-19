@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Animated,
   Image,
+  Keyboard,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -39,6 +40,57 @@ export function Icon({
   return <Ionicons name={name} size={size} color={color} style={style} />;
 }
 
+/**
+ * Wraps a press handler so a quick second tap is ignored. Without this, a
+ * double tap can push the same screen twice before the first one covers it.
+ */
+export function useSinglePress(onPress?: () => void, wait = 500): (() => void) | undefined {
+  const last = useRef(0);
+  if (!onPress) return undefined;
+  return () => {
+    const now = Date.now();
+    if (now - last.current < wait) return;
+    last.current = now;
+    onPress();
+  };
+}
+
+/** True while the on-screen keyboard is up (phones and touch browsers). */
+export function useKeyboardVisible(): boolean {
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    if (Platform.OS !== "web") {
+      const ios = Platform.OS === "ios";
+      const show = Keyboard.addListener(ios ? "keyboardWillShow" : "keyboardDidShow", () => setShown(true));
+      const hide = Keyboard.addListener(ios ? "keyboardWillHide" : "keyboardDidHide", () => setShown(false));
+      return () => {
+        show.remove();
+        hide.remove();
+      };
+    }
+    // Browsers have no keyboard events; on touch screens a focused text box means the keyboard is up.
+    if (typeof window === "undefined" || !window.matchMedia?.("(pointer: coarse)").matches) return undefined;
+    const typing = (el: any) =>
+      el?.tagName === "TEXTAREA" || (el?.tagName === "INPUT" && !/^(date|time|checkbox|radio|range|button|submit|file)$/.test(el.type));
+    const onFocus = () => setShown(typing(document.activeElement));
+    const onBlur = () => setTimeout(onFocus, 0);
+    // Dragging the page (not inside the text box) puts the keyboard away, like `keyboardDismissMode` on phones.
+    const onDrag = (e: TouchEvent) => {
+      const el = document.activeElement as HTMLElement | null;
+      if (typing(el) && !el!.contains(e.target as Node)) el!.blur();
+    };
+    document.addEventListener("focusin", onFocus);
+    document.addEventListener("focusout", onBlur);
+    document.addEventListener("touchmove", onDrag, { passive: true });
+    return () => {
+      document.removeEventListener("focusin", onFocus);
+      document.removeEventListener("focusout", onBlur);
+      document.removeEventListener("touchmove", onDrag);
+    };
+  }, []);
+  return shown;
+}
+
 /** Goes back when there is somewhere to go, otherwise to `fallback`. */
 export function goBack(fallback: any = "/") {
   if (router.canGoBack()) router.back();
@@ -65,6 +117,9 @@ export function Screen({
   refreshControl?: React.ReactElement<any>;
 }) {
   const insets = useSafeAreaInsets();
+  // The sticky footer hides while typing so it doesn't stack on top of the keyboard.
+  const typing = useKeyboardVisible();
+  const showFooter = Boolean(footer) && !typing;
   const bottom = inTabs ? 0 : insets.bottom;
   const content = <View style={[styles.page, wide && styles.pageWide, contentStyle]}>{children}</View>;
   return (
@@ -74,7 +129,10 @@ export function Screen({
           <ScrollView
             style={styles.flex}
             keyboardShouldPersistTaps="handled"
-            contentContainerStyle={{ paddingBottom: (footer ? 16 : 32) + (footer ? 0 : bottom) }}
+            // On the web this fires on every scroll (even scrolling a focused field into view), so
+            // useKeyboardVisible handles drags there instead.
+            keyboardDismissMode={Platform.OS === "web" ? "none" : "on-drag"}
+            contentContainerStyle={{ paddingBottom: (showFooter ? 16 : 32) + (showFooter ? 0 : bottom) }}
             refreshControl={refreshControl}
           >
             {content}
@@ -82,7 +140,7 @@ export function Screen({
         ) : (
           <View style={styles.flex}>{content}</View>
         )}
-        {footer && (
+        {showFooter && (
           <View style={[styles.footer, { paddingBottom: 12 + bottom }]}>
             <View style={[styles.footerInner, wide && styles.pageWide]}>{footer}</View>
           </View>
@@ -151,11 +209,12 @@ export function PageHeader({
   backTo?: string;
   actions?: React.ReactNode;
 }) {
+  const onBack = useSinglePress(() => goBack(backTo));
   return (
     <View style={styles.header}>
       {back && (
         <Pressable
-          onPress={() => goBack(backTo)}
+          onPress={onBack}
           style={styles.backBtn}
           accessibilityRole="button"
           accessibilityLabel="Back"
@@ -243,10 +302,11 @@ export function Card({
   onPress?: () => void;
   accessibilityLabel?: string;
 }) {
-  if (onPress) {
+  const press = useSinglePress(onPress);
+  if (press) {
     return (
       <Pressable
-        onPress={onPress}
+        onPress={press}
         accessibilityRole="button"
         accessibilityLabel={accessibilityLabel}
         style={({ pressed }) => [styles.card, pressed && styles.pressed, style]}
@@ -277,9 +337,10 @@ export function Tile({
   onPress?: () => void;
 }) {
   const s = [styles.tile, TILES[tone], style];
-  if (onPress) {
+  const press = useSinglePress(onPress);
+  if (press) {
     return (
-      <Pressable onPress={onPress} style={({ pressed }) => [...s, pressed && styles.pressed]}>
+      <Pressable onPress={press} style={({ pressed }) => [...s, pressed && styles.pressed]}>
         {children}
       </Pressable>
     );
@@ -328,6 +389,7 @@ export function Chip({
   onPress?: () => void;
 }) {
   const c = CHIPS[tone] ?? CHIPS.peach;
+  const press = useSinglePress(onPress);
   const body = (
     <View
       style={[
@@ -342,8 +404,8 @@ export function Chip({
       </Text>
     </View>
   );
-  return onPress ? (
-    <Pressable onPress={onPress} hitSlop={6}>
+  return press ? (
+    <Pressable onPress={press} hitSlop={6}>
       {body}
     </Pressable>
   ) : (
@@ -428,9 +490,10 @@ export function Button({
   const v = VARIANTS[variant];
   const s = SIZES[size];
   const isLink = variant.startsWith("link");
+  const press = useSinglePress(onPress);
   return (
     <Pressable
-      onPress={onPress}
+      onPress={press}
       disabled={disabled || loading}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel ?? title}
@@ -484,9 +547,10 @@ export function IconButton({
   disabled?: boolean;
   style?: StyleProp<ViewStyle>;
 }) {
+  const press = useSinglePress(onPress);
   return (
     <Pressable
-      onPress={onPress}
+      onPress={press}
       disabled={disabled}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
@@ -519,9 +583,10 @@ export function ListRow({
   last?: boolean;
 }) {
   const fg = danger ? colors.danger : colors.ink;
+  const press = useSinglePress(onPress);
   return (
     <Pressable
-      onPress={onPress}
+      onPress={press}
       accessibilityRole="button"
       style={({ pressed }) => [
         styles.listRow,
@@ -547,8 +612,30 @@ export function ListRow({
 
 // ---------- form controls ----------
 
-export function Label({ children, style }: { children: React.ReactNode; style?: StyleProp<TextStyle> }) {
-  return <Text style={[styles.label, style]}>{children}</Text>;
+export function Label({
+  children,
+  style,
+  required,
+}: {
+  children: React.ReactNode;
+  style?: StyleProp<TextStyle>;
+  required?: boolean;
+}) {
+  return (
+    <Text style={[styles.label, style]}>
+      {children}
+      {required ? <Text style={styles.required}> *</Text> : null}
+    </Text>
+  );
+}
+
+/** "* Required" note shown above forms that mark required fields. */
+export function RequiredNote({ style }: { style?: StyleProp<TextStyle> }) {
+  return (
+    <Text style={[type.small, type.muted, style]}>
+      <Text style={styles.required}>*</Text> Required
+    </Text>
+  );
 }
 
 export function Hint({ children }: { children: React.ReactNode }) {
@@ -581,18 +668,20 @@ export const Input: React.FC<InputProps> = ({ style, rows, multiline, invalid, v
 export function Field({
   label,
   hint,
+  required,
   style,
   children,
   ...inputProps
 }: {
   label?: string;
   hint?: string;
+  required?: boolean;
   style?: StyleProp<ViewStyle>;
   children?: React.ReactNode;
 } & InputProps) {
   return (
     <View style={style}>
-      {label ? <Label>{label}</Label> : null}
+      {label ? <Label required={required}>{label}</Label> : null}
       {children ?? <Input accessibilityLabel={label} {...inputProps} />}
       {hint ? <Hint>{hint}</Hint> : null}
     </View>
@@ -636,9 +725,11 @@ export function SelectField({
   onChange,
   placeholder = "Choose…",
   size,
+  required,
   style,
 }: {
   label?: string;
+  required?: boolean;
   value?: any;
   options: { label: string; value: any; sub?: string }[];
   onChange: (val: any) => void;
@@ -650,7 +741,7 @@ export function SelectField({
   const current = options.find((o) => o.value === value);
   return (
     <View style={style}>
-      {label ? <Label>{label}</Label> : null}
+      {label ? <Label required={required}>{label}</Label> : null}
       <Pressable
         onPress={() => setOpen(true)}
         accessibilityRole="button"
@@ -786,6 +877,72 @@ export function Dialog({
       </KeyboardAvoidingView>
     </Modal>
   );
+}
+
+/** What's wrong with a form: empty required fields, other problems, or a message from the server. */
+export interface FormProblem {
+  /** Labels of required fields that are empty. */
+  missing?: string[];
+  /** Other things to fix ("Scoring weights add up to 60%…"). */
+  problems?: string[];
+  /** A single message, e.g. from the server. */
+  message?: string;
+  title?: string;
+}
+
+export function hasProblem(p: FormProblem): boolean {
+  return Boolean(p.missing?.length || p.problems?.length || p.message);
+}
+
+function ProblemList({ items, color }: { items: string[]; color: string }) {
+  return (
+    <View style={{ gap: 6 }}>
+      {items.map((item) => (
+        <Row key={item} gap={10} align="flex-start">
+          <View style={[styles.problemDot, { backgroundColor: color }]} />
+          <Text style={[type.body, { flex: 1 }]}>{item}</Text>
+        </Row>
+      ))}
+    </View>
+  );
+}
+
+/**
+ * Popup shown when a form can't be submitted, listing every required field
+ * that's still empty, plus anything else to fix.
+ */
+export function useFormError(): [React.ReactElement, (problem: FormProblem) => void] {
+  const [problem, setProblem] = useState<FormProblem | null>(null);
+  const close = () => setProblem(null);
+  const missing = problem?.missing ?? [];
+  const problems = problem?.problems ?? [];
+  const element = (
+    <Dialog
+      visible={Boolean(problem)}
+      onClose={close}
+      title={problem?.title ?? (missing.length ? "Please fill in the required fields" : "Please check your details")}
+      footer={<Button title="OK" onPress={close} style={{ minWidth: 96 }} />}
+    >
+      <Stack gap={12}>
+        {missing.length > 0 && (
+          <View style={{ gap: 8 }}>
+            <Text style={[type.body, type.muted]}>
+              {missing.length === 1 ? "This field is still empty:" : `These ${missing.length} fields are still empty:`}
+            </Text>
+            <ProblemList items={missing} color={colors.danger} />
+          </View>
+        )}
+        {problems.length > 0 && (
+          <View style={{ gap: 8 }}>
+            {missing.length > 0 && <Text style={[type.body, type.muted]}>Also fix:</Text>}
+            <ProblemList items={problems} color={colors.gold} />
+          </View>
+        )}
+        {problem?.message ? <Text style={type.body}>{problem.message}</Text> : null}
+      </Stack>
+    </Dialog>
+  );
+  return [element, setProblem];
 }
 
 export function useConfirm(): [React.ReactElement | null, (opts: any) => Promise<boolean>] {
@@ -1083,6 +1240,8 @@ export const styles = StyleSheet.create({
   listRow: { flexDirection: "row", alignItems: "center", gap: 14, paddingVertical: 14, paddingHorizontal: 16, minHeight: 52 },
   listRowBorder: { borderBottomWidth: 1, borderBottomColor: colors.line },
   label: { fontSize: 15, fontWeight: "600", color: colors.ink, marginBottom: 6 },
+  required: { color: colors.danger, fontWeight: "700" },
+  problemDot: { width: 8, height: 8, borderRadius: 4, marginTop: 8 },
   input: {
     backgroundColor: colors.white,
     borderWidth: 1,

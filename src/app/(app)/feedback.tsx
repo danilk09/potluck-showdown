@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import { friendlyError, submitFeedback } from '../../data/api';
-import { Banner, Button, Card, Chip, Icon, Input, PageHeader, Row, Screen, Stack, StarRating, Tile } from '../../components/ui';
+import { Button, Card, Chip, Icon, Input, PageHeader, Row, Screen, Stack, StarRating, Tile, useFormError } from '../../components/ui';
 import { colors, type } from '../../theme';
 
 type Answer = 'hard' | 'okay' | 'easy' | 'unclear' | 'clear' | 'na';
@@ -41,17 +41,21 @@ export default function GiveFeedback() {
   const [features, setFeatures] = useState<Partial<Record<FeatureKey, Answer>>>({});
   const [comment, setComment] = useState('');
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
+  const [problemEl, showProblem] = useFormError();
   const [sent, setSent] = useState(false);
 
   const send = async () => {
+    if (busy) return;
+    if (!rating) {
+      showProblem({ missing: ['Overall app experience (tap a star)'] });
+      return;
+    }
     setBusy(true);
-    setError('');
     try {
       await submitFeedback({ source: 'form', rating, features, comment });
       setSent(true);
     } catch (err) {
-      setError(friendlyError(err));
+      showProblem({ title: 'Couldn’t send your feedback', message: friendlyError(err) });
     } finally {
       setBusy(false);
     }
@@ -77,7 +81,8 @@ export default function GiveFeedback() {
   }
 
   return (
-    <Screen footer={<Button size="lg" title={busy ? 'Sending…' : 'Send feedback'} loading={busy} disabled={!rating} onPress={send} />}>
+    <Screen footer={<Button size="lg" title={busy ? 'Sending…' : 'Send feedback'} loading={busy} onPress={send} />}>
+      {problemEl}
       <PageHeader title="Give feedback" />
       <Text style={[type.h2, { marginBottom: 4 }]}>A better potluck starts here</Text>
       <Text style={[type.body, type.muted, { marginBottom: 16 }]}>
@@ -87,7 +92,7 @@ export default function GiveFeedback() {
       <Stack gap={12}>
         <Card style={{ padding: 16 }}>
           <Row justify="space-between" style={{ marginBottom: 10 }}>
-            <Text style={type.h3}>Overall app experience</Text>
+            <Text style={type.h3}>Overall app experience <Text style={{ color: colors.danger }}>*</Text></Text>
             <Text style={[type.small, { color: colors.danger, fontWeight: '700' }]}>Required</Text>
           </Row>
           <StarRating label="Overall app experience" value={rating} onChange={setRating} />
@@ -129,7 +134,6 @@ export default function GiveFeedback() {
             placeholder="Your ideas" accessibilityLabel="What could we improve" />
         </Card>
 
-        {error ? <Banner>{error}</Banner> : null}
         {rating ? (
           <Tile tone="mint" style={{ paddingVertical: 10, paddingHorizontal: 14 }}>
             <Text style={[type.small, { color: colors.mintDark }]}>Your overall rating is ready. All other answers are optional.</Text>

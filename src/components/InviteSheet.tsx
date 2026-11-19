@@ -2,6 +2,8 @@ import React from "react";
 import { Text, View } from "react-native";
 import QRCode from "react-native-qrcode-svg";
 import { copyText, inviteLink, shareLink } from "../lib/platform";
+import { inviteMessage } from "../lib/inviteMessage";
+import { useAuth } from "../hooks/AuthContext";
 import { colors, type } from "../theme";
 import { Button, Dialog, Stack, Tile, useToast } from "./ui";
 
@@ -12,21 +14,30 @@ interface InviteSheetProps {
   justCreated?: boolean;
 }
 
+/** Opens the share sheet with a ready-to-send invite for a potluck. */
+export function useShareInvite() {
+  const toast = useToast();
+  const { user } = useAuth();
+  return async (potluck: any) => {
+    const res = await shareLink({
+      title: `Join ${potluck.title} on Potluck Showdown`,
+      text: inviteMessage(potluck),
+      url: inviteLink(potluck.inviteCode, user?.uid),
+    });
+    if (res === "copied") toast("Invite copied. Paste it into a message.");
+  };
+}
+
 /**
  * Invite sheet: the code, a QR code, and the share sheet. The link opens the
  * web version for people without the app (they can join as a guest).
  */
 export default function InviteSheet({ potluck, visible, onClose, justCreated }: InviteSheetProps) {
   const toast = useToast();
-  const url = inviteLink(potluck.inviteCode);
-  const share = async () => {
-    const res = await shareLink({
-      title: potluck.title,
-      text: `Join my potluck showdown "${potluck.title}"! Code: ${potluck.inviteCode}`,
-      url,
-    });
-    if (res === "copied") toast("Invite link copied");
-  };
+  const shareInvite = useShareInvite();
+  const { user } = useAuth();
+  const url = inviteLink(potluck.inviteCode, user?.uid);
+  const share = () => shareInvite(potluck);
   return (
     <Dialog visible={visible} onClose={onClose} title={justCreated ? "Your showdown is live! 🎉" : "Invite people"}>
       <Stack gap={12} style={{ alignItems: "center" }}>

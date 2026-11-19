@@ -5,6 +5,8 @@ import { phaseOf } from "../../src/lib/phase";
 import { earnedFrames, winCount } from "../../src/lib/frames";
 import { dishFields, potluckFields, toList } from "../../src/data/builders";
 import { aiScoreOnFive, healthPoints, mockHealthScore, supportsAiScoring } from "../../src/lib/healthScore";
+import { inviteMessage } from "../../src/lib/inviteMessage";
+import { formatServes } from "../../src/lib/formats";
 
 const scoring = [
   { id: "c0", name: "Deliciousness", weight: 60 },
@@ -183,5 +185,31 @@ describe("toList", () => {
   it("splits by line, or by comma on a single line, keeping quantities", () => {
     expect(toList("2 cups flour\n- 1 egg\n\n• salt")).toEqual(["2 cups flour", "1 egg", "salt"]);
     expect(toList("noodles, sesame,  soy")).toEqual(["noodles", "sesame", "soy"]);
+  });
+});
+
+describe("invite message", () => {
+  it("reads like an invitation and includes the details guests need", () => {
+    const text = inviteMessage({ title: "Taco Night", startsAt: new Date(2026, 10, 20, 18, 30).getTime(), location: "Maya’s place", theme: "Street food", inviteCode: "TACO-7K2Q" });
+    expect(text).toContain("Come join my potluck, “Taco Night”!");
+    expect(text).toContain("📍 Maya’s place");
+    expect(text).toContain("Theme: Street food");
+    expect(text).toContain("Invite code: TACO-7K2Q");
+  });
+
+  it("leaves out details the host didn't fill in", () => {
+    const text = inviteMessage({ title: "Brunch", inviteCode: "BRUNCH-1234" });
+    expect(text).not.toContain("📍");
+    expect(text).not.toContain("📅");
+    expect(text).not.toContain("Theme");
+  });
+});
+
+describe("serves", () => {
+  it("shows a number of people, keeping older free-text values", () => {
+    expect(formatServes("8")).toBe("8 people");
+    expect(formatServes("1")).toBe("1 person");
+    expect(formatServes("12 squares")).toBe("12 squares");
+    expect(formatServes("")).toBe("—");
   });
 });

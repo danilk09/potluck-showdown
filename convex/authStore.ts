@@ -29,6 +29,7 @@ export const createUser = internalMutation({
     displayName: v.string(),
     isGuest: v.boolean(),
     sessionToken: v.string(),
+    referredBy: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     if (args.email) {
@@ -38,8 +39,12 @@ export const createUser = internalMutation({
         .first();
       if (existing) fail("An account already uses that email. Try signing in instead.");
     }
+    // Credit whoever's invite link brought this person here, if that account exists.
+    const referrerId = args.referredBy ? ctx.db.normalizeId("users", args.referredBy) : null;
+    const referrer = referrerId ? await ctx.db.get(referrerId) : null;
     const now = Date.now();
     const userId = await ctx.db.insert("users", {
+      ...(referrer ? { referredBy: referrer._id } : {}),
       email: args.email,
       passwordHash: args.passwordHash,
       displayName: args.displayName,

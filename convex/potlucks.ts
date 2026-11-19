@@ -116,7 +116,8 @@ export const update = mutation({
 });
 
 export const join = mutation({
-  args: { sessionToken: v.string(), potluckId: v.string() },
+  // `invitedBy`: the member whose invite link was used, credited toward their Connector frames.
+  args: { sessionToken: v.string(), potluckId: v.string(), invitedBy: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx, args.sessionToken);
     const potluck = await requirePotluck(ctx, args.potluckId);
@@ -124,6 +125,14 @@ export const join = mutation({
     if (potluck.status === "closed") fail("This showdown has already ended.");
     if (potluck.maxGuests > 0 && potluck.memberIds.length >= potluck.maxGuests) fail("This potluck is full.");
     await setMembers(ctx, potluck, [...potluck.memberIds, user._id]);
+    // Only a member of this potluck can get credit, and never for yourself. A bad value just isn't credited.
+    if (args.invitedBy && args.invitedBy !== user._id && isMember(potluck, args.invitedBy)) {
+      const row = await ctx.db
+        .query("memberships")
+        .withIndex("by_potluck_user", (q) => q.eq("potluckId", potluck._id).eq("userId", user._id))
+        .unique();
+      if (row) await ctx.db.patch(row._id, { invitedBy: args.invitedBy });
+    }
     return { success: true };
   },
 });

@@ -1,5 +1,6 @@
 // Renders the app logo (SVG) into the PNGs app.json uses for the app icon,
-// Android adaptive icon, splash screen, and web favicon.
+// Android adaptive icon, splash screen, and web favicon, plus the picture
+// shown on invite-link previews (public/og-invite.png).
 // Usage: npm run icons
 import { mkdirSync } from 'node:fs';
 import sharp from 'sharp';
@@ -39,6 +40,24 @@ async function run() {
   await sharp(svg({ bg: null, scale: 0.62 })).png().toFile('assets/icon-foreground.png');
   await sharp(svg()).resize(192).png().toFile('assets/favicon.png');
   console.log('Icons written to assets/');
+
+  // Link preview card (1200x630) shown when an invite link is pasted into a chat.
+  mkdirSync('public', { recursive: true });
+  const card = Buffer.from(`
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${CORAL}"/><stop offset="1" stop-color="#F0703F"/></linearGradient></defs>
+  <rect width="1200" height="630" fill="url(#g)"/>
+  <g transform="translate(90 115) scale(0.42)">${mark}</g>
+  <g font-family="Arial, Helvetica, sans-serif" fill="#fff">
+    <text x="530" y="250" font-size="40" font-weight="700" fill="#FFE08A" letter-spacing="3">YOU'RE INVITED</text>
+    <text x="530" y="335" font-size="72" font-weight="800">Come join</text>
+    <text x="530" y="415" font-size="72" font-weight="800">my potluck!</text>
+    <text x="530" y="480" font-size="28">Bring a dish · Rate the food · Crown a winner</text>
+  </g>
+  <text x="600" y="585" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="28" font-weight="700" fill="#fff" opacity="0.85">Potluck Showdown · join in your browser, no app needed</text>
+</svg>`);
+  await sharp(card).png().toFile('public/og-invite.png');
+  console.log('Invite preview written to public/og-invite.png');
 }
 
 run().catch(console.error);

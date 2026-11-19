@@ -4,6 +4,8 @@ import type { Doc } from "./_generated/dataModel";
 import {
   FRAME_TIERS, SESSION_TTL_MS, fail, frameEarned, getPotluck, getSessionUser, requireUser,
 } from "./lib/access";
+import { userStats } from "./lib/stats";
+import { achievementById, earnedAchievementIds } from "../src/lib/achievements";
 
 const MAX_PROFILE_PHOTO = 120_000;
 
@@ -29,6 +31,15 @@ export const currentUser = query({
       createdAt: user.createdAt,
       feedbackPromptedIds: user.feedbackPromptedIds ?? [],
     };
+  },
+});
+
+/** The caller's own counts behind the achievement frames. */
+export const myStats = query({
+  args: { sessionToken: v.string() },
+  handler: async (ctx, args) => {
+    const user = await getSessionUser(ctx, args.sessionToken);
+    return user ? await userStats(ctx, user._id) : null;
   },
 });
 
@@ -76,9 +87,17 @@ export const updateProfile = mutation({
     }
     if (frame !== undefined) {
       if (frame !== null) {
-        if (!(FRAME_TIERS as readonly string[]).includes(frame.tier)) fail("Unknown frame.");
-        if (!frameEarned(frame.tier, await getPotluck(ctx, frame.potluckId), user._id)) {
-          fail("You haven’t earned that frame yet.");
+        if ((FRAME_TIERS as readonly string[]).includes(frame.tier)) {
+          // Classic frames are backed by one finished potluck.
+          if (!frameEarned(frame.tier, await getPotluck(ctx, frame.potluckId), user._id)) {
+            fail("You haven’t earned that frame yet.");
+          }
+        } else {
+          if (!achievementById(frame.tier)) fail("Unknown frame.");
+          if (!earnedAchievementIds(await userStats(ctx, user._id)).includes(frame.tier)) {
+            fail("You haven’t earned that frame yet.");
+          }
+          frame.potluckId = "";
         }
       }
       update.frame = frame;

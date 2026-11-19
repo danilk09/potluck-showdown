@@ -18,7 +18,11 @@ export default defineSchema({
     lastSeenAt: v.number(),
     // Finished potlucks the user has already been asked to rate the app for.
     feedbackPromptedIds: v.optional(v.array(v.string())),
-  }).index("by_email", ["email"]),
+    // Whoever's invite link brought this person to the app (for the Mentor frames).
+    referredBy: v.optional(v.id("users")),
+  })
+    .index("by_email", ["email"])
+    .index("by_referredBy", ["referredBy"]),
 
   // One row per signed-in device. Tokens come from a cryptographic RNG in an
   // action, expire, and are deleted on sign-out.
@@ -90,9 +94,12 @@ export default defineSchema({
   memberships: defineTable({
     userId: v.string(),
     potluckId: v.id("potlucks"),
+    // The member whose invite link this person joined through (for the Connector frames).
+    invitedBy: v.optional(v.string()),
   })
     .index("by_userId", ["userId"])
-    .index("by_potluck_user", ["potluckId", "userId"]),
+    .index("by_potluck_user", ["potluckId", "userId"])
+    .index("by_invitedBy", ["invitedBy"]),
 
   dishes: defineTable({
     potluckId: v.string(),

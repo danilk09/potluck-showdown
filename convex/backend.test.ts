@@ -531,3 +531,56 @@ describe("changes: memberships, prizes, weights, feedback, deleted accounts", ()
     expect(author[guest.id]).toMatchObject({ displayName: "Deleted user" });
   });
 });
+
+describe("achievement frames, invites and referrals", () => {
+  test("achievement frames must be earned, and the server does the counting", async () => {
+    const { t, guest, potluckId } = await setup();
+    const wear = (tier: string) =>
+      t.mutation(api.users.updateProfile, { sessionToken: guest.token, patch: { frame: { tier, potluckId: "" } } });
+    await expect(wear("critic:1")).rejects.toThrow(/earned/);
+    await expect(wear("made-up:1")).rejects.toThrow(/Unknown frame/);
+    // Ten ballots make a Taste Tester.
+    await t.run(async (ctx) => {
+      for (let i = 0; i < 10; i++) {
+        await ctx.db.insert("ballots", { potluckId, dishId: `d${i}`, userId: guest.id, scores: {}, createdAt: 0 });
+      }
+    });
+    expect(await t.query(api.users.myStats, { sessionToken: guest.token })).toMatchObject({ votes: 10 });
+    await wear("critic:1");
+    expect(await t.query(api.users.currentUser, { sessionToken: guest.token })).toMatchObject({ frame: { tier: "critic:1" } });
+    await expect(wear("critic:2")).rejects.toThrow(/earned/);
+  });
+
+  test("joining through someone's invite link credits them once, and only a member can be credited", async () => {
+    const { t, host, guest, outsider, potluckId, signUp } = await setup();
+    const friend = await signUp("friend");
+    await t.mutation(api.potlucks.join, { sessionToken: friend.token, potluckId, invitedBy: guest.id });
+    expect(await t.query(api.users.myStats, { sessionToken: guest.token })).toMatchObject({ invited: 1 });
+    // An outsider isn't in this potluck, so naming them earns them nothing.
+    const other = await signUp("other");
+    await t.mutation(api.potlucks.join, { sessionToken: other.token, potluckId, invitedBy: outsider.id });
+    expect(await t.query(api.users.myStats, { sessionToken: outsider.token })).toMatchObject({ invited: 0 });
+    // You can't invite yourself.
+    const second = await t.mutation(api.potlucks.create, {
+      sessionToken: host.token, form: potluckForm({ inviteCode: "SECOND-2222" }),
+    });
+    await t.mutation(api.potlucks.join, { sessionToken: guest.token, potluckId: second, invitedBy: guest.id });
+    expect(await t.query(api.users.myStats, { sessionToken: guest.token })).toMatchObject({ invited: 1 });
+  });
+
+  test("bringing someone to the app who then hosts a finished potluck earns a Mentor frame", async () => {
+    const { t, host } = await setup();
+    const { sessionToken } = await t.action(api.auth.signUp, {
+      email: "newbie@example.com", password: "password123", displayName: "Newbie", referredBy: host.id,
+    });
+    expect(await t.query(api.users.myStats, { sessionToken: host.token })).toMatchObject({ mentored: 0 });
+    const theirs = await t.mutation(api.potlucks.create, { sessionToken, form: potluckForm({ inviteCode: "NEWBIE-1111" }) });
+    expect(await t.query(api.users.myStats, { sessionToken: host.token })).toMatchObject({ mentored: 0 });
+    await t.mutation(api.potlucks.publishResults, { sessionToken, potluckId: theirs });
+    expect(await t.query(api.users.myStats, { sessionToken: host.token })).toMatchObject({ mentored: 1 });
+    await t.mutation(api.users.updateProfile, { sessionToken: host.token, patch: { frame: { tier: "mentor:1", potluckId: "" } } });
+    // A made-up referrer is ignored.
+    const { sessionToken: lone } = await t.action(api.auth.signInGuest, { displayName: "Lone", referredBy: "not-a-user" });
+    expect(await t.query(api.users.currentUser, { sessionToken: lone })).not.toBeNull();
+  });
+});

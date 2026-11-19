@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { Redirect, router, useLocalSearchParams } from 'expo-router';
+import { Redirect, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '../../../../hooks/AuthContext';
 import { useDishes, useMyRatings, useNow, usePotluck } from '../../../../hooks/useFirestore';
 import { useProfiles } from '../../../../hooks/useProfiles';
@@ -10,7 +10,7 @@ import { PHASE_CHIP, PHASE_LABEL, phaseOf, Phase } from '../../../../lib/phase';
 import { formatDuration, formatWhen } from '../../../../lib/dates';
 import { toMillis } from '../../../../lib/scoring';
 import Avatar, { AvatarStack, displayName } from '../../../../components/Avatar';
-import InviteSheet from '../../../../components/InviteSheet';
+import InviteSheet, { useShareInvite } from '../../../../components/InviteSheet';
 import {
   Button, Card, Chip, EmptyState, FsImage, HeroCard, Icon, IconButton, LoadingScreen, OptionSheet, PageHeader, Row, Screen, Stack, Tile,
   useConfirm, useToast,
@@ -100,7 +100,20 @@ export default function EventDetail() {
   const [confirmEl, confirm] = useConfirm();
   const [busy, setBusy] = useState(false);
   const [menu, setMenu] = useState(false);
+  // Opened right after creating a potluck (?invite=new), or from the Invite buttons.
+  const [inviteOpen, setInviteOpen] = useState<null | 'new' | 'invite'>(invite === 'new' ? 'new' : invite ? 'invite' : null);
+  const shareInvite = useShareInvite();
   const { data: potluck, loading } = usePotluck(pid);
+
+  useEffect(() => {
+    if (invite) router.setParams({ invite: undefined });
+  }, [invite]);
+
+  // Popups sit above every screen, so close them when another screen (like an opened invite link) takes over.
+  useFocusEffect(useCallback(() => () => {
+    setInviteOpen(null);
+    setMenu(false);
+  }, []));
   const uid = user?.uid || '';
   const isMember = Boolean(potluck?.memberIds.includes(uid));
   const { data: dishes } = useDishes(pid, isMember);
@@ -119,7 +132,7 @@ export default function EventDetail() {
   const claimed = potluck.dishCategories.reduce((sum: number, c: any) => sum + Math.min(c.needed, dishes.filter((d: any) => d.categoryId === c.id).length), 0);
   const othersDishes = dishes.filter((d: any) => d.authorId !== uid);
   const ratedCount = othersDishes.filter((d: any) => ratings.has(d.id)).length;
-  const showInvite = (kind = '1') => router.setParams({ invite: kind });
+  const showInvite = () => setInviteOpen('invite');
 
   const run = async (fn: () => Promise<any>, success?: string) => {
     setBusy(true);
@@ -178,9 +191,10 @@ export default function EventDetail() {
   return (
     <Screen footer={cta}>
       {confirmEl}
-      <InviteSheet potluck={potluck} visible={Boolean(invite)} justCreated={invite === 'new'} onClose={() => router.setParams({ invite: undefined })} />
+      <InviteSheet potluck={potluck} visible={Boolean(inviteOpen)} justCreated={inviteOpen === 'new'} onClose={() => setInviteOpen(null)} />
       <OptionSheet visible={menu} onClose={() => setMenu(false)} options={[
-        { label: 'Invite people', icon: 'share-social-outline', onPress: () => showInvite() },
+        { label: 'Invite people', icon: 'person-add-outline', onPress: showInvite },
+        { label: 'Share invite link', icon: 'share-social-outline', onPress: () => shareInvite(potluck) },
         { label: 'Open food feed', icon: 'image-outline', onPress: () => router.push({ pathname: '/feed', params: { pid } }) },
         ...(isHost && phase !== 'closed' ? [
           { label: 'Edit details', icon: 'pencil' as any, onPress: () => router.push(`/potlucks/${pid}/edit` as any) },
@@ -191,7 +205,14 @@ export default function EventDetail() {
       <PageHeader
         title="Event details"
         backTo="/events"
-        actions={<IconButton name="ellipsis-horizontal" color={colors.coral} size={26} onPress={() => setMenu(true)} accessibilityLabel="More options" />}
+        actions={(
+          <Row gap={4}>
+            {phase !== 'closed' && (
+              <IconButton name="share-social-outline" color={colors.coral} size={24} onPress={() => shareInvite(potluck)} accessibilityLabel="Share invite link" />
+            )}
+            <IconButton name="ellipsis-horizontal" color={colors.coral} size={26} onPress={() => setMenu(true)} accessibilityLabel="More options" />
+          </Row>
+        )}
       />
 
       <HeroCard style={{ marginBottom: 16 }}>
@@ -207,10 +228,25 @@ export default function EventDetail() {
           <Row gap={4}><Icon name="location-outline" size={16} color={colors.white} /><Text style={[type.body, { color: colors.white, flex: 1 }]}>{potluck.location}</Text></Row>
         ) : null}
         <Row justify="space-between" style={{ marginTop: 14 }}>
-          <AvatarStack uids={potluck.memberIds} max={4} />
-          <Button size="sm" variant="white" icon="person-add-outline" title={`${potluck.memberIds.length} attending`} onPress={() => showInvite()} />
+          <Row gap={8} style={{ flexShrink: 1 }}>
+            <AvatarStack uids={potluck.memberIds} max={4} />
+            <Text style={[type.small, type.bold, { color: colors.white }]} numberOfLines={1}>{potluck.memberIds.length} going</Text>
+          </Row>
+          {phase !== 'closed' && <Button size="sm" variant="white" icon="person-add-outline" title="Invite" onPress={showInvite} />}
         </Row>
       </HeroCard>
+
+      <Row gap={8} style={{ marginBottom: 16 }}>
+        {phase !== 'closed' && (
+          <Button style={s.quick} size="sm" variant="soft" icon="share-social-outline" title="Share" onPress={() => shareInvite(potluck)} />
+        )}
+        <Button style={s.quick} size="sm" variant="soft" icon="image-outline" title="Food feed" onPress={() => router.push({ pathname: '/feed', params: { pid } })} />
+        {isHost && phase !== 'closed' ? (
+          <Button style={s.quick} size="sm" variant="soft" icon="pencil" title="Edit" onPress={() => router.push(`/potlucks/${pid}/edit` as any)} />
+        ) : phase === 'closed' ? (
+          <Button style={s.quick} size="sm" variant="soft" icon="trophy-outline" title="Results" onPress={() => router.push(`/potlucks/${pid}/results` as any)} />
+        ) : null}
+      </Row>
 
       <PhasePanel potluck={potluck} phase={phase} isHost={isHost} dishes={dishes} rateableCount={othersDishes.length} ratedCount={ratedCount} now={now} onAction={onAction} busy={busy} />
       <PrizeList prizes={potluck.prizes} style={{ marginBottom: 16 }} />
@@ -249,7 +285,12 @@ export default function EventDetail() {
                 ))}
                 {missing > 0 && <Text style={[type.small, { color: colors.danger }]}>Still needs {missing} contribution{missing === 1 ? '' : 's'}</Text>}
               </View>
-              <Text style={[type.small, type.muted]}>{inCat.length} claimed</Text>
+              {missing > 0 && phase === 'open' ? (
+                <Button size="sm" variant="soft" icon="add" title="Claim" accessibilityLabel={`Bring a dish for ${cat.name}`}
+                  onPress={() => router.push({ pathname: `/potlucks/${pid}/dish` as any, params: { cat: cat.id } })} />
+              ) : (
+                <Text style={[type.small, type.muted]}>{inCat.length} claimed</Text>
+              )}
             </View>
           );
         })}
@@ -285,5 +326,6 @@ const s = StyleSheet.create({
     borderWidth: 1, borderColor: colors.line, borderRadius: 16,
   },
   catNeeds: { borderColor: colors.goldLine, borderWidth: 2 },
+  quick: { flex: 1, paddingHorizontal: 8 },
   catIcon: { width: 46, height: 46, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
 });
