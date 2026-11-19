@@ -115,7 +115,7 @@ export default function RateDish() {
       {aiScoring.length > 0 && (
         <Stack gap={12} style={{ marginBottom: 12 }}>
           {aiScoring.map((c: any) => (
-            <HealthScoreMeter key={c.id} title={c.name} variant="reveal" score={healthPoints(dish, c.id)} />
+            <HealthScoreMeter key={c.id} title={c.name} score={healthPoints(dish, c.id)} />
           ))}
         </Stack>
       )}

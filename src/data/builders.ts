@@ -93,7 +93,6 @@ export function dishFields(form: any) {
     recipePhoto: form.recipePhoto ?? null,
     usedRequired: Boolean(form.usedRequired),
     updatedAt: Date.now(),
-    ...(form.aiScores && typeof form.aiScores === "object" ? { aiScores: form.aiScores } : {}),
   };
 }
 
