@@ -1,6 +1,6 @@
-// Copies the server-side API keys from .env onto the Convex deployment.
+// Copies the server-side API keys from .env / .env.local onto the Convex deployment.
 // Convex functions read process.env on the deployment, never this project's
-// .env file, so the keys have to be set there.
+// env files, so the keys have to be set there. .env.local overrides .env.
 //
 //   npm run env:sync     (also runs at the start of npm run eval:seed)
 //
@@ -12,15 +12,18 @@ import { join } from "node:path";
 import { parse } from "dotenv";
 
 const KEYS = ["PRIVATE_MODE_API_KEY", "USDA_API_KEY"];
+const FILES = [".env", ".env.local"];
 
-if (!existsSync(".env")) {
-  console.error("✖ No .env file found in the project folder.");
+const present = FILES.filter((file) => existsSync(file));
+if (!present.length) {
+  console.error("✖ No .env or .env.local file found in the project folder.");
   process.exit(1);
 }
-const env = parse(readFileSync(".env"));
+// Later files win, so a key in .env.local overrides the same key in .env.
+const env = present.reduce<Record<string, string>>((acc, file) => ({ ...acc, ...parse(readFileSync(file)) }), {});
 const found = KEYS.filter((k) => env[k]?.trim());
 const missing = KEYS.filter((k) => !found.includes(k));
-if (missing.length) console.warn(`! Not in .env, skipped: ${missing.join(", ")}`);
+if (missing.length) console.warn(`! Not in .env or .env.local, skipped: ${missing.join(", ")}`);
 if (!found.length) process.exit(0);
 
 // Only these keys go to the server, through a temporary file so they never
@@ -30,7 +33,7 @@ const quote = (value: string) => (value.includes("'") ? `"${value}"` : `'${value
 const content = found.map((k) => `${k}=${quote(env[k].trim())}`).join("\n") + "\n";
 const roundTrip = parse(content);
 if (found.some((k) => roundTrip[k] !== env[k].trim())) {
-  console.error("✖ A key in .env has characters that can't be copied safely. Set it by hand: npx convex env set NAME");
+  console.error("✖ A key has characters that can't be copied safely. Set it by hand: npx convex env set NAME");
   process.exit(1);
 }
 
