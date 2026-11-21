@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Pressable, StyleProp, Text, View, ViewStyle } from "react-native";
 import { colors, radius } from "../theme";
 import { Input, Label, Row } from "./ui";
-import { formatTypedTime, parseTypedTime, toTypedTime } from "./dateTimeValue";
+import { formatTypedTime, fromMilitary, parseTypedTime, toTypedTime } from "./dateTimeValue";
 
 interface TimeInputProps {
   label?: string;
@@ -15,6 +15,7 @@ interface TimeInputProps {
 
 /**
  * A time typed on the number pad ("630" shows as 6:30) with an AM/PM toggle.
+ * A 24-hour time ("1300") is turned into 1:00 with PM picked.
  * Emits "HH:mm" in 24-hour time, or "" while the typed time isn't valid.
  */
 export default function TimeInput({ label, required, value, onChange, disabled, style }: TimeInputProps) {
@@ -40,12 +41,21 @@ export default function TimeInput({ label, required, value, onChange, disabled, 
     if (out !== (value ?? "")) onChange(out);
   };
 
+  // Shows a 24-hour time as 12-hour with AM/PM picked for them.
+  const show = (nextText: string, done: boolean) => {
+    const converted = fromMilitary(nextText, done);
+    const shown = converted?.text ?? nextText;
+    const nextPm = converted ? converted.pm : pm;
+    setText(shown);
+    if (converted) setPm(nextPm);
+    emit(shown, nextPm);
+  };
+
   const type = (raw: string) => {
     let next = formatTypedTime(raw);
     // Backspacing over the ":" removes the digit before it.
     if (raw.length < text.length && next === text) next = formatTypedTime(next.replace(/\D/g, "").slice(0, -1));
-    setText(next);
-    emit(next, pm);
+    show(next, false);
   };
 
   const choose = (nextPm: boolean) => {
@@ -62,10 +72,14 @@ export default function TimeInput({ label, required, value, onChange, disabled, 
           style={{ flex: 1, minWidth: 0 }}
           value={text}
           onChangeText={type}
-          onBlur={() => setTouched(true)}
+          onBlur={() => {
+            setTouched(true);
+            show(text, true);
+          }}
           keyboardType="number-pad"
           inputMode="numeric"
           maxLength={5}
+          selectTextOnFocus
           placeholder="6:30"
           editable={!disabled}
           invalid={invalid}

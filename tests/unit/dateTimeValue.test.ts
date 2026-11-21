@@ -1,7 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { formatTypedTime, parseTypedTime, parseValue, setDatePart, setTimePart, toTypedTime, toValue, setTypedTimePart, missingTime } from "../../src/components/dateTimeValue";
+import { formatTypedTime, fromMilitary, parseTypedTime, parseValue, setDatePart, setTimePart, toTypedTime, toValue, setTypedTimePart, missingTime } from "../../src/components/dateTimeValue";
 
 describe("mobile date and time values", () => {
+  it("turns a typed 24-hour time into 12-hour with AM/PM picked", () => {
+    expect(fromMilitary("13:00")).toEqual({ text: "1:00", pm: true });
+    expect(fromMilitary("23:45")).toEqual({ text: "11:45", pm: true });
+    expect(fromMilitary("00:30")).toEqual({ text: "12:30", pm: false });
+    // Ordinary 12-hour times are left alone.
+    expect(fromMilitary("6:30")).toBeNull();
+    expect(fromMilitary("12:15")).toBeNull();
+    expect(fromMilitary("24:00")).toBeNull();
+    // Mid-typing, "13" might still become "1:30", so it waits until the field is left.
+    expect(fromMilitary("13")).toBeNull();
+    expect(fromMilitary("13", true)).toEqual({ text: "1:00", pm: true });
+  });
+
   it("round trips local dates and times without changing the selected hour", () => {
     expect(toValue("date", parseValue("date", "2026-10-21"))).toBe("2026-10-21");
     expect(toValue("time", parseValue("time", "09:05"))).toBe("09:05");

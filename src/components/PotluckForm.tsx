@@ -21,9 +21,10 @@ import {
   Banner,
   Button,
   Card,
+  Checkbox,
   EmptyState,
+  Icon,
   Field,
-  Hint,
   IconButton,
   Input,
   Label,
@@ -36,6 +37,7 @@ import {
   Stack,
   hasProblem,
   useFormError,
+  goBack,
   useToast,
   type FormProblem,
 } from "./ui";
@@ -52,14 +54,16 @@ function blankForm() {
     title: "",
     date: "",
     time: "18:30",
+    timeTbd: false,
     location: "",
+    allergyNote: "",
     format: "classic",
     formatDetail: "",
     theme: "",
     description: "",
     inviteCode: generateInviteCode(),
-    // Sliders start at 0%; the host spreads the 100% across categories.
-    scoring: DEFAULT_SCORING.map((c) => ({ ...c, weight: 0 })),
+    // Two categories split 50/50. Hosts remove a category rather than setting it to 0%.
+    scoring: DEFAULT_SCORING.map((c) => ({ ...c })),
     dishCategories: categoriesFor("classic"),
     maxGuests: "",
     votingOpensAt: "",
@@ -70,7 +74,17 @@ function blankForm() {
   };
 }
 
-async function loadDrafts(userId: string) {
+/** "just now", "5 min ago", "3 hr ago", or the date. */
+function savedAgo(at: number): string {
+  const min = Math.round((Date.now() - at) / 60_000);
+  if (min < 1) return "just now";
+  if (min < 60) return `${min} min ago`;
+  if (min < 24 * 60) return `${Math.round(min / 60)} hr ago`;
+  return new Date(at).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+/** Potluck drafts saved on this device for a user, newest first. */
+export async function loadDrafts(userId: string) {
   try {
     const saved = JSON.parse((await AsyncStorage.getItem(`${DRAFT_KEY}-${userId}`)) || "null");
     if (Array.isArray(saved)) return saved;
@@ -91,8 +105,10 @@ function fromPotluck(p: any) {
   return {
     title: p.title,
     date: toInputDate(p.startsAt),
-    time: toInputTime(p.startsAt),
+    time: p.timeTbd ? "18:30" : toInputTime(p.startsAt),
+    timeTbd: Boolean(p.timeTbd),
     location: p.location ?? "",
+    allergyNote: p.allergyNote ?? "",
     format: p.format,
     formatDetail: p.formatDetail ?? "",
     theme: p.theme ?? "",
@@ -221,14 +237,29 @@ function PotluckEditor({ existing, userId }: { existing: any; userId: string }) 
       "scoring",
       form.scoring.map((c: any, j: number) => (j === i ? { ...c, ...patch } : c))
     );
+  // A new category takes an even share; the others shrink to make room, keeping their proportions.
   const addScoring = (s?: any) => {
+    const share = Math.floor(100 / (form.scoring.length + 1));
+    const rest = 100 - share;
+    const scaled = form.scoring.map((c: any) => ({
+      ...c,
+      weight: Math.floor(((Number(c.weight) || 0) * rest) / Math.max(1, total)),
+    }));
+    if (scaled.length) scaled[0].weight += rest - weightsTotal(scaled);
     set("scoring", [
-      ...form.scoring,
-      { id: `c${form.scoring.length}`, name: s?.name ?? "", description: s?.description ?? "", weight: 0 },
+      ...scaled,
+      { id: `c${form.scoring.length}`, name: s?.name ?? "", description: s?.description ?? "", weight: share },
     ]);
+  };
+  // Removing a category hands its share to the first one left, so the total stays at 100%.
+  const removeScoring = (i: number) => {
+    const kept = form.scoring.filter((_: any, j: number) => j !== i).map((c: any) => ({ ...c }));
+    if (kept.length) kept[0].weight = (Number(kept[0].weight) || 0) + (Number(form.scoring[i].weight) || 0);
+    set("scoring", kept);
   };
   // A slider can only use the percentage the other categories haven't taken.
   const availableFor = (i: number) => 100 - (total - (Number(form.scoring[i].weight) || 0));
+
   const setWeight = (i: number, value: number) =>
     setScoring(i, { weight: Math.max(0, Math.min(availableFor(i), Math.round(value))) });
   const setCategory = (i: number, patch: any) => {
@@ -263,6 +294,14 @@ function PotluckEditor({ existing, userId }: { existing: any; userId: string }) 
     setChecked(false);
   };
 
+  const currentDraft = drafts.find((d) => d.id === draftId);
+  const isDraft = Boolean(currentDraft);
+  const saveAndExit = async () => {
+    await draftWrites.current.catch(() => {});
+    toast("Draft saved. Pick it up from Create potluck.");
+    goBack("/");
+  };
+
   const removeDraft = async () => {
     const next = drafts.filter((d) => d.id !== draftId);
     setDrafts(next);
@@ -278,16 +317,16 @@ function PotluckEditor({ existing, userId }: { existing: any; userId: string }) 
   const validateStep1 = (): FormProblem => {
     const missing: string[] = [];
     const problems: string[] = [];
-    if (!form.title.trim()) missing.push("Challenge title");
+    if (!form.title.trim()) missing.push("Potluck name");
     if (!form.date) missing.push("Date");
-    if (!form.time) missing.push("Time (type it like 6:30)");
+    if (!form.time && !form.timeTbd) missing.push("Start time (type it like 6:30)");
     if (fmt.detailLabel && !form.formatDetail.trim()) missing.push(fmt.detailLabel);
     if (!editing && !form.inviteCode.trim()) missing.push("Invite code");
     const unnamed = form.scoring.filter((c: any) => !c.name.trim()).length;
     if (unnamed) missing.push(unnamed === 1 ? "Scoring category name" : `${unnamed} scoring category names`);
 
     if (form.date && dateChanged && form.date < todayValue()) problems.push("The date has passed. Pick today or a later date.");
-    else if (form.date && form.time && dateChanged && (localDateTime(form.date, form.time)?.getTime() ?? 0) < Date.now())
+    else if (form.date && form.time && !form.timeTbd && dateChanged && (localDateTime(form.date, form.time)?.getTime() ?? 0) < Date.now())
       problems.push("That start time has already passed. Pick a later time.");
     if (!editing && form.inviteCode.trim() && !isValidInviteCode(normalizeInviteCode(form.inviteCode)))
       problems.push("Invite codes use 4–20 letters, numbers, or dashes.");
@@ -303,6 +342,10 @@ function PotluckEditor({ existing, userId }: { existing: any; userId: string }) 
     if (missingTime(form.votingClosesAt)) missing.push("Time voting closes (type it like 9:00)");
     if (form.votingOpensAt && form.votingClosesAt && form.votingClosesAt <= form.votingOpensAt)
       problems.push("Voting must close after it opens.");
+    // Voting can't start before the food arrives. With no start time yet, compare the day.
+    const start = form.timeTbd ? form.date : `${form.date}T${form.time}`;
+    if (form.date && form.votingOpensAt && !missingTime(form.votingOpensAt) && form.votingOpensAt.slice(0, start.length) < start)
+      problems.push("Voting can’t open before the potluck starts. Pick a time after it begins.");
     const guests = parseInt(form.maxGuests, 10);
     if (editing && guests && guests < existing.memberIds.length)
       problems.push(`The guest limit is below the ${existing.memberIds.length} people already going.`);
@@ -354,11 +397,11 @@ function PotluckEditor({ existing, userId }: { existing: any; userId: string }) 
 
   const footer =
     step === 1 ? (
-      <Button size="lg" title="Next: dishes & voting" onPress={next} />
+      <Button size="lg" title="Next: dishes & voting" iconRight="arrow-forward" onPress={next} />
     ) : (
       <Button
         size="lg"
-        title={busy ? "Saving…" : editing ? "Save changes" : "Create Challenge"}
+        title={busy ? "Saving…" : editing ? "Save changes" : "Create potluck"}
         loading={busy}
         onPress={submit}
       />
@@ -369,8 +412,8 @@ function PotluckEditor({ existing, userId }: { existing: any; userId: string }) 
       <PageHeader
         title={editing ? "Edit potluck" : "Create a potluck"}
         actions={
-          !editing && (
-            <Button variant="link" title={`Drafts (${drafts.length})`} onPress={() => setDraftMenu(true)} />
+          !editing && drafts.length > 0 && (
+            <Button size="sm" variant="soft" icon="document-text-outline" title={`Drafts (${drafts.length})`} onPress={() => setDraftMenu(true)} />
           )
         }
       />
@@ -384,7 +427,7 @@ function PotluckEditor({ existing, userId }: { existing: any; userId: string }) 
             ...drafts.map((d) => ({
               key: d.id,
               label: d.form.title?.trim() || "Untitled potluck",
-              sub: d.form.date || "Date not set",
+              sub: `${d.form.date || "Date not set"} · saved ${savedAgo(d.updatedAt)}`,
               selected: d.id === draftId,
               onPress: () => openDraft(d),
             })),
@@ -394,22 +437,46 @@ function PotluckEditor({ existing, userId }: { existing: any; userId: string }) 
           ]}
         />
       )}
-      {!editing && (
-        <Text style={[type.small, type.muted, { marginBottom: 8 }]}>
-          Changes to this potluck save as a draft automatically on this device.
-        </Text>
+      {!editing && isDraft && (
+        <Row gap={8} style={s.draftBar}>
+          <Icon name="checkmark-circle" size={18} color={colors.mintDark} />
+          <Text style={[type.small, type.bold, { color: colors.mintDark, flex: 1 }]}>
+            Draft saved on this device{currentDraft ? ` · ${savedAgo(currentDraft.updatedAt)}` : ""}
+          </Text>
+          <Button size="sm" variant="outline" title="Save & finish later" onPress={saveAndExit} />
+        </Row>
+      )}
+      {!editing && !isDraft && !draftDirty && step === 1 && drafts.length > 0 && (
+        <View style={s.resume}>
+          <Text style={[type.body, type.bold, { marginBottom: 6 }]}>Continue a draft</Text>
+          {drafts.slice(0, 3).map((d) => (
+            <Pressable key={d.id} onPress={() => openDraft(d)} accessibilityRole="button"
+              style={({ pressed }) => [s.resumeRow, pressed && { opacity: 0.6 }]}>
+              <Icon name="document-text-outline" size={20} color={colors.coral} />
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={[type.body, type.bold]} numberOfLines={1}>{d.form.title?.trim() || "Untitled potluck"}</Text>
+                <Text style={[type.small, type.muted]}>{d.form.date || "Date not set"} · saved {savedAgo(d.updatedAt)}</Text>
+              </View>
+              <Text style={[type.small, type.link]}>Continue ›</Text>
+            </Pressable>
+          ))}
+          {drafts.length > 3 && (
+            <Button variant="link" size="sm" title={`See all ${drafts.length} drafts`} style={{ alignSelf: "flex-start" }} onPress={() => setDraftMenu(true)} />
+          )}
+          <Text style={[type.small, type.muted, { marginTop: 6 }]}>Or fill in the form below to start a new one.</Text>
+        </View>
       )}
       {step === 2 && (
         <Button
           variant="link"
           icon="chevron-back"
-          title="Challenge setup"
+          title="Back to potluck details"
           style={{ alignSelf: "flex-start" }}
           onPress={() => setStep(1)}
         />
       )}
       <Text style={s.step}>
-        {step === 1 ? "Challenge setup" : "Dishes & voting"} · {step} of 2
+        Step {step} of 2 · {step === 1 ? "Potluck details & scoring" : "Dishes & voting"}
       </Text>
       {problemEl}
       <RequiredNote style={{ marginBottom: 12 }} />
@@ -417,7 +484,7 @@ function PotluckEditor({ existing, userId }: { existing: any; userId: string }) 
       {step === 1 ? (
         <Stack gap={16}>
           <Field
-            label="Challenge title"
+            label="Potluck name"
             required
             invalid={checked && !form.title.trim()}
             value={form.title}
@@ -444,15 +511,25 @@ function PotluckEditor({ existing, userId }: { existing: any; userId: string }) 
               onChange={(v) => set("date", v)}
               placeholder="Pick a date"
             />
-            <DateTimeField
-              style={{ flex: 1 }}
-              label="Time"
-              required
-              mode="time"
-              value={form.time}
-              onChange={(v) => set("time", v)}
-            />
+            {form.timeTbd ? (
+              <View style={{ flex: 1 }}>
+                <Label>Start time</Label>
+                <View style={s.tbd}><Text style={[type.body, type.muted]}>To be decided</Text></View>
+              </View>
+            ) : (
+              <DateTimeField
+                style={{ flex: 1 }}
+                label="Start time"
+                required
+                mode="time"
+                value={form.time}
+                onChange={(v) => set("time", v)}
+              />
+            )}
           </Row>
+          <Checkbox checked={form.timeTbd} onChange={(v) => set("timeTbd", v)}>
+            <Text style={type.body}>Start time not decided yet</Text>
+          </Checkbox>
           <Field label="Location" {...field("location")} maxLength={160} placeholder="Hawthorne Hall rooftop" />
 
           <View>
@@ -486,13 +563,19 @@ function PotluckEditor({ existing, userId }: { existing: any; userId: string }) 
               placeholder={fmt.detailPlaceholder}
             />
           )}
-          <Field label="Challenge theme" {...field("theme")} maxLength={120} placeholder="Plant-based comfort food" />
+          <Field label="Theme" {...field("theme")} maxLength={120} placeholder="Plant-based comfort food" />
           <Field
             label="Description"
             {...field("description")}
             rows={3}
             maxLength={1000}
             placeholder="Bring a shareable, healthy dish and compete for the tastiest, most nutritious plate."
+          />
+          <Field
+            label="Allergies"
+            {...field("allergyNote")}
+            maxLength={300}
+            placeholder="e.g. No peanuts, a guest has a severe allergy"
           />
 
           {!editing && (
@@ -517,22 +600,38 @@ function PotluckEditor({ existing, userId }: { existing: any; userId: string }) 
                   onPress={() => set("inviteCode", generateInviteCode(form.title))}
                 />
               </Row>
-              <Hint>Guests type this code or open your invite link to join.</Hint>
             </View>
           )}
 
           <View>
-            <Row justify="space-between" style={{ marginBottom: 6 }}>
-              <Text style={[type.body, type.bold]}>
-                Scoring categories <Text style={{ color: colors.danger }}>*</Text>
-              </Text>
-              <Text style={[type.small, type.bold, { color: total === 100 ? colors.mint : colors.danger }]}>
-                {total}% of 100%
-              </Text>
+            <Row justify="space-between" align="flex-start" style={{ marginBottom: 8 }}>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={[type.body, type.bold]}>
+                  Scoring Categories <Text style={{ color: colors.danger }}>*</Text>
+                </Text>
+                <Text style={[type.small, type.bold, { color: total === 100 ? colors.mint : colors.danger }]}>
+                  {total === 100 ? "100% assigned ✓" : `${total}% of 100% assigned · ${100 - total}% left`}
+                </Text>
+              </View>
+              {form.scoring.length < MAX_SCORING && !scoringLocked && (
+                <Button size="sm" icon="add" title="Add Category" onPress={() => setAddMenu(true)} />
+              )}
             </Row>
-            {!scoringLocked && total < 100 && (
-              <Text style={[type.small, type.muted, { marginBottom: 6 }]}>{100 - total}% left to assign.</Text>
-            )}
+            <Text style={[type.small, type.muted, { marginBottom: 10 }]}>
+              Each category is something guests judge every dish on, like taste. The percentage is how much that
+              category counts toward a dish’s final score. Together they must add up to 100%.
+            </Text>
+            <OptionSheet
+              visible={addMenu}
+              onClose={() => setAddMenu(false)}
+              title="Add a scoring category"
+              options={[
+                ...SCORING_SUGGESTIONS.filter((sg) => !form.scoring.some((c: any) => c.name === sg.name)).map(
+                  (sg) => ({ label: sg.name, sub: sg.description, onPress: () => addScoring(sg) })
+                ),
+                { label: "Custom…", icon: "create-outline", onPress: () => addScoring() },
+              ]}
+            />
             {scoringLocked && (
               <Banner tone="warning" style={{ marginBottom: 8 }}>
                 Voting has started, so scoring can’t change.
@@ -564,15 +663,10 @@ function PotluckEditor({ existing, userId }: { existing: any; userId: string }) 
                         onChangeText={(v) => setScoring(i, { description: v })}
                       />
                     </View>
-                    <Text style={[type.body, type.bold, { minWidth: 44, textAlign: "right" }]}>{c.weight}%</Text>
-                    {form.scoring.length > 1 && !scoringLocked && (
-                      <IconButton
-                        name="trash-outline"
-                        color={colors.danger}
-                        accessibilityLabel={`Remove ${c.name}`}
-                        onPress={() => set("scoring", form.scoring.filter((_: any, j: number) => j !== i))}
-                      />
-                    )}
+                    <View style={{ alignItems: "flex-end" }}>
+                      <Text style={type.h3}>{c.weight}%</Text>
+                      <Text style={[type.small, type.muted]}>of score</Text>
+                    </View>
                   </Row>
                   <Slider
                     style={{ marginTop: 6, height: 36 }}
@@ -588,17 +682,14 @@ function PotluckEditor({ existing, userId }: { existing: any; userId: string }) 
                     thumbTintColor={colors.coral}
                     accessibilityLabel={`${c.name || "Category"} weight`}
                   />
-                  <Text style={[type.small, type.muted]}>
-                    {scoringLocked ? "" : `Up to ${availableFor(i)}% available for this category`}
-                  </Text>
                   {supportsAiScoring(c.name) && (
-                    <View style={{ marginTop: 10 }}>
-                      <Text style={[type.small, type.muted, { marginBottom: 6 }]}>How healthiness is scored</Text>
+                    <View style={{ marginTop: 10, marginBottom: 4 }}>
+                      <Text style={[type.small, type.bold, { marginBottom: 6 }]}>Who scores {c.name || "healthiness"}?</Text>
                       <Row gap={8} align="stretch">
                         {(
                           [
-                            ["manual", "Manual", "Guests give stars"],
-                            ["ai", "AI calculated", "Scored for each dish"],
+                            ["manual", "Guests rate it", "1–5 stars."],
+                            ["ai", "AI scores it", "Gives each dish a 0–100 health score based on the nutrition of its ingredients."],
                           ] as const
                         ).map(([mode, label, sub]) => {
                           const on = (c.mode === "ai" ? "ai" : "manual") === mode;
@@ -623,61 +714,56 @@ function PotluckEditor({ existing, userId }: { existing: any; userId: string }) 
                         })}
                       </Row>
                       {c.mode === "ai" && (
-                        <>
-                          <Hint>
-                            Ingredient amounts and USDA nutrition data determine a score out of 100 when a dish is saved.
-                          </Hint>
-                          <Button
-                            variant="link"
-                            icon="sparkles"
-                            title="Preview a sample score"
-                            style={{ alignSelf: "flex-start" }}
-                            onPress={() => setScorePreview(c.name || "Healthiness")}
-                          />
-                        </>
+                        <Button
+                          variant="link"
+                          icon="sparkles"
+                          title="See an example AI score"
+                          style={{ alignSelf: "flex-start", marginTop: 6 }}
+                          onPress={() => setScorePreview(c.name || "Healthiness")}
+                        />
                       )}
                     </View>
+                  )}
+                  {form.scoring.length > 1 && !scoringLocked && (
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      icon="trash-outline"
+                      title="Remove Category"
+                      style={{ alignSelf: "flex-start", marginTop: 8 }}
+                      onPress={() => removeScoring(i)}
+                    />
                   )}
                 </Card>
               ))}
             </Stack>
-            {form.scoring.length < MAX_SCORING && !scoringLocked && (
-              <>
-                <Button
-                  variant="link"
-                  icon="add"
-                  title="Add category"
-                  style={{ alignSelf: "flex-start", marginTop: 8 }}
-                  onPress={() => setAddMenu(true)}
-                />
-                <OptionSheet
-                  visible={addMenu}
-                  onClose={() => setAddMenu(false)}
-                  title="Add a scoring category"
-                  options={[
-                    ...SCORING_SUGGESTIONS.filter((sg) => !form.scoring.some((c: any) => c.name === sg.name)).map(
-                      (sg) => ({ label: sg.name, sub: sg.description, onPress: () => addScoring(sg) })
-                    ),
-                    { label: "Custom…", icon: "create-outline", onPress: () => addScoring() },
-                  ]}
-                />
-              </>
-            )}
           </View>
         </Stack>
       ) : (
         <Stack gap={16}>
           <View>
-            <Text style={[type.body, type.bold, { marginBottom: 2 }]}>
-              {form.format === "courses" ? "Course brackets" : "Dish categories"}{" "}
-              <Text style={{ color: colors.danger }}>*</Text>
-            </Text>
-            <Text style={[type.small, type.muted, { marginBottom: 8 }]}>
-              Guests claim a spot when they add their dish.{" "}
-              {form.format === "courses"
-                ? "Each bracket gets its own winner."
-                : "Each category with votes gets its own winner too."}
-            </Text>
+            <Row justify="space-between" align="flex-start" style={{ marginBottom: 8 }}>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={[type.body, type.bold]}>
+                  {form.format === "courses" ? "Total dishes per course" : "Total dishes needed"}{" "}
+                  <Text style={{ color: colors.danger }}>*</Text>
+                </Text>
+                <Text style={[type.small, type.bold, { color: colors.mint }]}>
+                  {form.dishCategories.reduce((sum: number, c: any) => sum + (parseInt(c.needed, 10) || 0), 0)} dishes in total
+                </Text>
+              </View>
+              {form.dishCategories.length < 12 && (
+                <Button
+                  size="sm"
+                  icon="add"
+                  title={form.format === "courses" ? "Add Course" : "Add Category"}
+                  onPress={() => {
+                    setCategoriesTouched(true);
+                    set("dishCategories", [...form.dishCategories, { id: newId(), name: "", needed: 2 }]);
+                  }}
+                />
+              )}
+            </Row>
             <Stack gap={8}>
               {form.dishCategories.map((c: any, i: number) => (
                 <Card
@@ -699,19 +785,22 @@ function PotluckEditor({ existing, userId }: { existing: any; userId: string }) 
                     accessibilityLabel="Category name"
                     onChangeText={(v) => setCategory(i, { name: v })}
                   />
-                  <Text style={[type.small, type.muted]}>Need</Text>
                   <Input
                     style={{ width: 52, textAlign: "center", paddingHorizontal: 6 }}
                     keyboardType="number-pad"
-                    accessibilityLabel="Dishes needed"
+                    selectTextOnFocus
+                    accessibilityLabel={`Total ${c.name || "dishes"} needed`}
                     value={String(c.needed)}
                     onChangeText={(v) => setCategory(i, { needed: v.replace(/\D/g, "").slice(0, 2) })}
                   />
+                  <Text style={[type.small, type.muted]}>total</Text>
                   {form.dishCategories.length > 1 && (
                     <IconButton
                       name="trash-outline"
-                      color={colors.danger}
-                      accessibilityLabel={`Remove ${c.name}`}
+                      color={colors.white}
+                      size={18}
+                      style={s.removeIcon}
+                      accessibilityLabel={`Remove category ${c.name}`}
                       onPress={() => {
                         setCategoriesTouched(true);
                         set("dishCategories", form.dishCategories.filter((_: any, j: number) => j !== i));
@@ -721,27 +810,14 @@ function PotluckEditor({ existing, userId }: { existing: any; userId: string }) 
                 </Card>
               ))}
             </Stack>
-            {form.dishCategories.length < 12 && (
-              <Button
-                variant="link"
-                icon="add"
-                title="Add category"
-                style={{ alignSelf: "flex-start", marginTop: 8 }}
-                onPress={() => {
-                  setCategoriesTouched(true);
-                  set("dishCategories", [...form.dishCategories, { id: newId(), name: "", needed: 2 }]);
-                }}
-              />
-            )}
           </View>
 
-          <Card style={{ padding: 16 }}>
-            <Text style={[type.body, type.bold]}>
-              Voting schedule <Text style={[type.small, type.muted, { fontWeight: "400" }]}>(optional)</Text>
+          <View>
+            <Text style={[type.body, type.bold, { marginBottom: 8 }]}>
+              Voting schedule
             </Text>
-            <Text style={[type.small, type.muted, { marginTop: 4, marginBottom: 12 }]}>
-              Voting opens and closes on its own at these times. You can also open voting and publish results by hand
-              from the event page.
+            <Text style={[type.small, type.muted, { marginTop: -4, marginBottom: 8 }]}>
+              Leave blank to open and close voting yourself at the event.
             </Text>
             <Stack gap={12}>
               <DateTimeField
@@ -762,7 +838,7 @@ function PotluckEditor({ existing, userId }: { existing: any; userId: string }) 
                 onChange={(v) => set("votingClosesAt", v)}
               />
             </Stack>
-          </Card>
+          </View>
 
           <Field
             label="Guest limit"
@@ -773,10 +849,7 @@ function PotluckEditor({ existing, userId }: { existing: any; userId: string }) 
           />
 
           <View>
-            <Label>Prizes (optional)</Label>
-            <Text style={[type.small, type.muted, { marginBottom: 8 }]}>
-              Offering something for the winners? Add it here. You provide the prize; Potluck Showdown just shows it to guests.
-            </Text>
+            <Label>Prizes</Label>
             <Stack gap={8}>
               {["🥇 1st place", "🥈 2nd place", "🥉 3rd place"].map((place, i) => (
                 <Input
@@ -815,6 +888,20 @@ function PotluckEditor({ existing, userId }: { existing: any; userId: string }) 
 
 const s = StyleSheet.create({
   step: { color: colors.mint, fontWeight: "700", fontSize: 14, marginBottom: 12 },
+  draftBar: { backgroundColor: colors.mintSoft, borderRadius: 12, paddingVertical: 8, paddingHorizontal: 12, marginBottom: 12 },
+  resume: { borderWidth: 1, borderColor: colors.line, borderRadius: 12, backgroundColor: colors.white, padding: 12, marginBottom: 16 },
+  resumeRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 8, borderTopWidth: 1, borderTopColor: colors.line },
+  removeIcon: { backgroundColor: colors.danger, borderRadius: 10, padding: 7 },
+  tbd: {
+    borderWidth: 1,
+    borderColor: colors.inputLine,
+    borderStyle: "dashed",
+    borderRadius: 12,
+    paddingVertical: 11,
+    paddingHorizontal: 14,
+    minHeight: 46,
+    justifyContent: "center",
+  },
   formats: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   format: {
     flexGrow: 1,

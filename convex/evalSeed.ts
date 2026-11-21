@@ -70,6 +70,8 @@ interface DishSpec {
   dietary?: string[];
   prep: number;
   cal: number;
+  /** Grams of protein per serving. Estimated from calories when left out. */
+  protein?: number;
   /** AI health score, 0–100. */
   health: number;
   /** Target average guest score per manual category (1–5). */
@@ -575,8 +577,16 @@ export function likersFor(p: PotluckSpec, d: DishSpec): string[] {
 
 // ---------- seed ----------
 
+/** About 30% of calories from protein for high-protein dishes, 14% otherwise (4 kcal per gram). */
+function proteinFor(d: DishSpec): number {
+  if (d.protein != null) return d.protein;
+  const share = d.dietary?.includes("High-protein") ? 0.3 : 0.14;
+  return Math.round((d.cal * share) / 4);
+}
+
 const TABLES = [
   "users", "sessions", "passwordResets", "memberships", "feedback", "potlucks", "dishes", "ballots", "inviteCodes", "images",
+  "reports",
 ] as const;
 
 const imageKey = (p: string, i: number | "cover") => `${p}_${i}`;
@@ -695,6 +705,7 @@ export const load = internalMutation({
           dietary: d.dietary ?? [],
           prepMinutes: d.prep,
           calories: d.cal,
+          protein: proteinFor(d),
           photo,
           recipePhoto: null,
           usedRequired: Boolean(p.usedRequired),
@@ -752,6 +763,11 @@ export const resetTesters = internalMutation({
         displayName: TESTER_NAMES[key], photoURL: null, frame: null, isGuest: false, passwordHash, feedbackPromptedIds: [],
       });
 
+      // Photos they reported.
+      for (const r of await ctx.db.query("reports").withIndex("by_reporterId", (q) => q.eq("reporterId", uid)).collect()) {
+        await ctx.db.delete(r._id);
+      }
+
       // Potlucks they created during a task.
       for (const p of await ctx.db.query("potlucks").withIndex("by_hostId", (q) => q.eq("hostId", uid)).collect()) {
         await deletePotluckCascade(ctx, p);
@@ -794,6 +810,11 @@ export const resetTesters = internalMutation({
           .first();
         if (!potluck) continue;
 
+        // No spots held without a dish (the seed has none).
+        if (potluck.spotClaims?.some((c) => c.userId === uid)) {
+          await ctx.db.patch(potluck._id, { spotClaims: potluck.spotClaims.filter((c) => c.userId !== uid) });
+        }
+
         // Membership as seeded.
         const seededMember = ps.members.includes(key);
         if (seededMember !== potluck.memberIds.includes(uid)) {
@@ -807,6 +828,8 @@ export const resetTesters = internalMutation({
           .collect();
         for (const d of dishes) {
           const ds = ps.dishes.find((x) => x.name === d.name);
+          // Nothing saved, as seeded.
+          if (d.savedBy?.includes(uid)) await ctx.db.patch(d._id, { savedBy: d.savedBy.filter((m) => m !== uid) });
           // Likes as seeded.
           const shouldLike = Boolean(ds && likersFor(ps, ds).includes(key));
           if (shouldLike !== d.likedBy.includes(uid)) {

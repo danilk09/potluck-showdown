@@ -5,7 +5,7 @@ import { useAuth } from "../hooks/AuthContext";
 import { friendlyError, joinPotluck, lookupInvite } from "../data/api";
 import { normalizeInviteCode } from "../lib/inviteCode";
 import { formatInfo } from "../lib/formats";
-import { formatWhen } from "../lib/dates";
+import { potluckWhen } from "../lib/dates";
 import { PHASE_CHIP, PHASE_LABEL, phaseOf } from "../lib/phase";
 import { AuthorLine } from "./Avatar";
 import { Banner, Button, Chip, Dialog, Icon, Input, Label, Row, Stack, Tile } from "./ui";
@@ -114,13 +114,13 @@ export default function JoinDialog({ visible, onClose }: { visible: boolean; onC
             </Row>
             <View>
               <Text style={type.h3}>{potluck.title}</Text>
-              {potluck.theme ? <Text style={[type.small, { color: colors.coral, fontWeight: "700" }]}>{potluck.theme}</Text> : null}
+              {potluck.theme ? <Text style={[type.small, { color: colors.coral, fontWeight: "700" }]}>Theme: {potluck.theme}</Text> : null}
             </View>
             <AuthorLine uid={potluck.hostId} sub="Host" size={32} />
             <Stack gap={4}>
               <Row gap={6}>
                 <Icon name="calendar-outline" size={16} color={colors.muted} />
-                <Text style={[type.small, { flex: 1 }]}>{formatWhen(potluck.startsAt)}</Text>
+                <Text style={[type.small, { flex: 1 }]}>{potluckWhen(potluck)}</Text>
               </Row>
               {potluck.location ? (
                 <Row gap={6}>

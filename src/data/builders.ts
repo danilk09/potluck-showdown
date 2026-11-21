@@ -23,7 +23,8 @@ export function potluckFields(form: any) {
     weight: Number(c.weight) || 0,
     ...(c.mode === "ai" ? { mode: "ai" as const } : {}),
   }));
-  const startsAtDate = localDateTime(form.date, form.time);
+  // An undecided time is stored as noon on the chosen day, so the date still sorts and displays.
+  const startsAtDate = localDateTime(form.date, form.timeTbd ? "12:00" : form.time);
   return {
     title: (form.title || "").trim(),
     theme: (form.theme ?? "").trim(),
@@ -31,6 +32,8 @@ export function potluckFields(form: any) {
     formatDetail: (form.formatDetail ?? "").trim(),
     description: (form.description ?? "").trim(),
     location: (form.location ?? "").trim(),
+    allergyNote: (form.allergyNote ?? "").trim(),
+    timeTbd: Boolean(form.timeTbd),
     startsAt: startsAtDate ? startsAtDate.getTime() : Date.now(),
     votingOpensAt: toEpoch(form.votingOpensAt),
     votingClosesAt: toEpoch(form.votingClosesAt),
@@ -90,6 +93,7 @@ export function dishFields(form: any) {
     dietary: form.dietary ?? [],
     prepMinutes: toInt(form.prepMinutes),
     calories: toInt(form.calories),
+    protein: toInt(form.protein),
     photo: form.photo ?? null,
     recipePhoto: form.recipePhoto ?? null,
     usedRequired: Boolean(form.usedRequired),

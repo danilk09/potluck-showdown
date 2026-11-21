@@ -190,7 +190,7 @@ export function FrameSummary({ frames, onOpen }: { frames: ReturnType<typeof use
     .sort((a, b) => b.progress - a.progress)
     .slice(0, 2);
   return (
-    <Card style={{ padding: 16, marginBottom: 24 }}>
+    <Card style={{ padding: 16, marginBottom: 24 }} onPress={onOpen} accessibilityLabel="See all frames and change yours">
       <Row justify="space-between" style={{ marginBottom: 8 }}>
         <Text style={[type.body, type.bold]}>{frames.count} of {frames.total} frames collected</Text>
         <Text style={[type.small, type.bold, { color: colors.coral }]}>{Math.round((frames.count / frames.total) * 100)}%</Text>

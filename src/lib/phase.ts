@@ -18,7 +18,7 @@ export function phaseOf(p: any, now: number = Date.now()): Phase {
 }
 
 export const PHASE_LABEL: Record<Phase, string> = {
-  open: "Open challenge",
+  open: "Taking dishes",
   voting: "Voting open",
   tallying: "Tallying votes",
   closed: "Results are in",

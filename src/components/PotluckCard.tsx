@@ -6,7 +6,7 @@ import { useShareInvite } from "./InviteSheet";
 import { Card, Chip, FsImage, Icon, IconButton } from "./ui";
 import { PHASE_CHIP, PHASE_LABEL, phaseOf } from "../lib/phase";
 import { formatInfo } from "../lib/formats";
-import { formatWhen } from "../lib/dates";
+import { potluckWhen } from "../lib/dates";
 import { useAuth } from "../hooks/AuthContext";
 import { colors, type } from "../theme";
 
@@ -50,7 +50,7 @@ export default function PotluckCard({ potluck, now, onPress, selected, share = t
             {potluck.theme || fmt.label}
           </Text>
           <Text style={[type.small, type.muted]} numberOfLines={2}>
-            {formatWhen(potluck.startsAt)}
+            {potluckWhen(potluck)}
             {spots != null && ` · ${spots > 0 ? `${spots} spot${spots === 1 ? "" : "s"} left` : "Full"}`}
           </Text>
           <View style={s.going}>

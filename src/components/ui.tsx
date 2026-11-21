@@ -97,6 +97,15 @@ export function goBack(fallback: any = "/") {
   else router.replace(fallback);
 }
 
+/** Closes every screen stacked over the tabs, then opens a tab ("/feed", or with params). */
+export function goToTab(href: any) {
+  if (router.canDismiss()) router.dismissAll();
+  router.navigate(href);
+}
+
+/** True for screens shown above the app's bottom navigation bar (it pads for the safe area itself). */
+export const BottomNavContext = createContext(false);
+
 // ---------- layout ----------
 
 export function Screen({
@@ -107,6 +116,7 @@ export function Screen({
   wide = false,
   contentStyle,
   refreshControl,
+  scrollRef,
 }: {
   children: React.ReactNode;
   footer?: React.ReactNode;
@@ -115,18 +125,21 @@ export function Screen({
   wide?: boolean;
   contentStyle?: StyleProp<ViewStyle>;
   refreshControl?: React.ReactElement<any>;
+  scrollRef?: React.RefObject<any>;
 }) {
   const insets = useSafeAreaInsets();
   // The sticky footer hides while typing so it doesn't stack on top of the keyboard.
   const typing = useKeyboardVisible();
   const showFooter = Boolean(footer) && !typing;
-  const bottom = inTabs ? 0 : insets.bottom;
+  const navBelow = useContext(BottomNavContext);
+  const bottom = inTabs || navBelow ? 0 : insets.bottom;
   const content = <View style={[styles.page, wide && styles.pageWide, contentStyle]}>{children}</View>;
   return (
     <View style={[styles.screen, { paddingTop: insets.top }]}>
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         {scroll ? (
           <ScrollView
+            ref={scrollRef}
             style={styles.flex}
             keyboardShouldPersistTaps="handled"
             // On the web this fires on every scroll (even scrolling a focused field into view), so
@@ -202,14 +215,17 @@ export function PageHeader({
   title,
   back = true,
   backTo,
+  onBack: onBackOverride,
   actions,
 }: {
   title: string;
   back?: boolean;
   backTo?: string;
+  /** Replaces the usual "go back one screen", e.g. to always return to one place. */
+  onBack?: () => void;
   actions?: React.ReactNode;
 }) {
-  const onBack = useSinglePress(() => goBack(backTo));
+  const onBack = useSinglePress(onBackOverride ?? (() => goBack(backTo)));
   return (
     <View style={styles.header}>
       {back && (
@@ -291,16 +307,23 @@ export function EmptyState({
 
 // ---------- surfaces ----------
 
+/**
+ * A tappable card is raised (shadow) and can show a chevron; a card without
+ * `onPress` is a flat panel, so information never looks like a button.
+ */
 export function Card({
   children,
   style,
   onPress,
   accessibilityLabel,
+  chevron,
 }: {
   children: React.ReactNode;
   style?: StyleProp<ViewStyle>;
   onPress?: () => void;
   accessibilityLabel?: string;
+  /** Show a "›" at the right edge (for row-shaped cards that open something). */
+  chevron?: boolean;
 }) {
   const press = useSinglePress(onPress);
   if (press) {
@@ -309,13 +332,50 @@ export function Card({
         onPress={press}
         accessibilityRole="button"
         accessibilityLabel={accessibilityLabel}
-        style={({ pressed }) => [styles.card, pressed && styles.pressed, style]}
+        style={({ pressed }) => [styles.card, chevron && styles.cardChevron, pressed && styles.pressed, style]}
       >
         {children}
+        {chevron && <Icon name="chevron-forward" size={18} color={colors.muted} />}
       </Pressable>
     );
   }
-  return <View style={[styles.card, style]}>{children}</View>;
+  return <View style={[styles.panel, style]}>{children}</View>;
+}
+
+/**
+ * Key facts read left to right, label over value ("CALORIES / 420 kcal").
+ * Values wrap instead of being cut off. Items with no value are left out.
+ */
+export function Facts({
+  items,
+  style,
+  size = "md",
+}: {
+  items: { label: string; value?: string | number | null; tone?: "default" | "good" | "warn" }[];
+  style?: StyleProp<ViewStyle>;
+  size?: "sm" | "md";
+}) {
+  const shown = items.filter((i) => i.value != null && i.value !== "");
+  if (!shown.length) return null;
+  return (
+    <View style={[styles.facts, size === "sm" && { gap: 14 }, style]}>
+      {shown.map((i) => (
+        <View key={i.label} style={{ minWidth: size === "sm" ? 0 : 64 }}>
+          <Text style={[type.caps, { color: colors.muted, fontSize: size === "sm" ? 10 : 11 }]}>{i.label}</Text>
+          <Text
+            style={[
+              size === "sm" ? type.small : type.body,
+              type.bold,
+              i.tone === "good" && { color: colors.mintDark },
+              i.tone === "warn" && { color: colors.coralDark },
+            ]}
+          >
+            {i.value}
+          </Text>
+        </View>
+      ))}
+    </View>
+  );
 }
 
 const TILES: Record<string, ViewStyle> = {
@@ -1022,6 +1082,44 @@ export function FsImage({
 
 // ---------- chips, stars, progress ----------
 
+/** One choice from a few, as equal-width pills on a single line (labels never wrap onto their own row). */
+export function Segmented<T extends string>({
+  options,
+  value,
+  onChange,
+  style,
+}: {
+  options: { value: T; label: string }[];
+  value: T;
+  onChange: (v: T) => void;
+  style?: StyleProp<ViewStyle>;
+}) {
+  return (
+    <View style={[styles.segments, style]} accessibilityRole="radiogroup">
+      {options.map((o) => {
+        const on = o.value === value;
+        return (
+          <Pressable
+            key={o.value}
+            onPress={() => {
+              tapFeedback();
+              onChange(o.value);
+            }}
+            accessibilityRole="radio"
+            accessibilityState={{ checked: on }}
+            accessibilityLabel={o.label}
+            style={[styles.segment, on && styles.segmentOn]}
+          >
+            <Text style={[type.small, type.bold, { color: on ? colors.white : colors.ink }]} numberOfLines={1}>
+              {o.label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
 export function ChipToggleGroup({
   options,
   value,
@@ -1221,6 +1319,15 @@ export const styles = StyleSheet.create({
     borderRadius: radius.lg,
     ...shadow,
   },
+  cardChevron: { flexDirection: "row", alignItems: "center", gap: 12 },
+  // Static information: flat, no shadow, so it doesn't read as tappable.
+  panel: {
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radius.md,
+  },
+  facts: { flexDirection: "row", flexWrap: "wrap", columnGap: 22, rowGap: 10 },
   tile: { borderRadius: radius.lg },
   hero: { borderRadius: radius.xl, padding: 20, overflow: "hidden" },
   pressed: { opacity: 0.85, transform: [{ scale: 0.99 }] },
@@ -1320,6 +1427,24 @@ export const styles = StyleSheet.create({
     minHeight: 38,
   },
   toggleText: { fontSize: 14, fontWeight: "600", color: colors.ink },
+  segments: {
+    flexDirection: "row",
+    gap: 4,
+    padding: 4,
+    borderRadius: radius.pill,
+    backgroundColor: "#f4ece6",
+  },
+  segment: {
+    flex: 1,
+    minWidth: 0,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 8,
+    paddingHorizontal: 6,
+    borderRadius: radius.pill,
+    minHeight: 36,
+  },
+  segmentOn: { backgroundColor: colors.ink },
   starRow: { flexDirection: "row", gap: 10 },
   star: {
     flex: 1,

@@ -79,9 +79,15 @@ export async function deleteUserCascade(ctx: MutationCtx, userId: Id<"users">) {
       .withIndex("by_potluckId", (q) => q.eq("potluckId", p._id))
       .collect();
     for (const d of dishes) {
-      if (d.likedBy.includes(userId)) {
-        await ctx.db.patch(d._id, { likedBy: d.likedBy.filter((id) => id !== userId) });
+      if (d.likedBy.includes(userId) || d.savedBy?.includes(userId)) {
+        await ctx.db.patch(d._id, {
+          likedBy: d.likedBy.filter((id) => id !== userId),
+          ...(d.savedBy ? { savedBy: d.savedBy.filter((id) => id !== userId) } : {}),
+        });
       }
+    }
+    if (p.spotClaims?.some((c) => c.userId === userId)) {
+      await ctx.db.patch(p._id, { spotClaims: p.spotClaims.filter((c) => c.userId !== userId) });
     }
     await setMembers(ctx, p, p.memberIds.filter((id) => id !== userId));
   }
@@ -115,6 +121,12 @@ export async function deleteUserCascade(ctx: MutationCtx, userId: Id<"users">) {
     .withIndex("by_userId", (q) => q.eq("userId", userId))
     .collect();
   for (const s of sessions) await ctx.db.delete(s._id);
+
+  const reports = await ctx.db
+    .query("reports")
+    .withIndex("by_reporterId", (q) => q.eq("reporterId", userId))
+    .collect();
+  for (const r of reports) await ctx.db.delete(r._id);
 
   const resets = await ctx.db
     .query("passwordResets")

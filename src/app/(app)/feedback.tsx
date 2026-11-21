@@ -1,8 +1,8 @@
-import { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useRef, useState } from 'react';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import { friendlyError, submitFeedback } from '../../data/api';
-import { Button, Card, Chip, Icon, Input, PageHeader, Row, Screen, Stack, StarRating, Tile, useFormError } from '../../components/ui';
+import { Button, Card, Chip, Icon, Input, PageHeader, Row, Screen, Stack, StarRating, useFormError } from '../../components/ui';
 import { colors, type } from '../../theme';
 
 type Answer = 'hard' | 'okay' | 'easy' | 'unclear' | 'clear' | 'na';
@@ -43,6 +43,9 @@ export default function GiveFeedback() {
   const [busy, setBusy] = useState(false);
   const [problemEl, showProblem] = useFormError();
   const [sent, setSent] = useState(false);
+  const scroll = useRef<any>(null);
+  // The comment box is the last thing on the page: once the keyboard is up, scroll it into view.
+  const revealComment = () => setTimeout(() => scroll.current?.scrollToEnd({ animated: true }), Platform.OS === 'ios' ? 350 : 200);
 
   const send = async () => {
     if (busy) return;
@@ -81,19 +84,15 @@ export default function GiveFeedback() {
   }
 
   return (
-    <Screen footer={<Button size="lg" title={busy ? 'Sending…' : 'Send feedback'} loading={busy} onPress={send} />}>
+    <Screen scrollRef={scroll} footer={<Button size="lg" title={busy ? 'Sending…' : 'Send feedback'} loading={busy} onPress={send} />}>
       {problemEl}
       <PageHeader title="Give feedback" />
-      <Text style={[type.h2, { marginBottom: 4 }]}>A better potluck starts here</Text>
-      <Text style={[type.body, type.muted, { marginBottom: 16 }]}>
-        Tell us what’s working and what could be better. About 1 minute · only overall rating is required.
-      </Text>
+      <Text style={[type.h2, { marginBottom: 16 }]}>How was Potluck Showdown? (about 1 minute)</Text>
 
       <Stack gap={12}>
         <Card style={{ padding: 16 }}>
           <Row justify="space-between" style={{ marginBottom: 10 }}>
             <Text style={type.h3}>Overall app experience <Text style={{ color: colors.danger }}>*</Text></Text>
-            <Text style={[type.small, { color: colors.danger, fontWeight: '700' }]}>Required</Text>
           </Row>
           <StarRating label="Overall app experience" value={rating} onChange={setRating} />
           <Row justify="space-between" style={{ marginTop: 4 }}>
@@ -105,12 +104,9 @@ export default function GiveFeedback() {
 
         <Card style={{ padding: 16 }}>
           <Row justify="space-between">
-            <Text style={type.h3}>How did the features feel?</Text>
-            <Text style={[type.small, type.muted]}>Optional</Text>
+            <Text style={type.h3}>How did each feature feel?</Text>
           </Row>
-          <Text style={[type.small, type.muted, { marginBottom: 12 }]}>
-            Skip any question. Choose N/A (not applicable) for features you haven’t used.
-          </Text>
+          <View style={{ height: 12 }} />
           <Stack gap={14}>
             {QUESTIONS.map((q) => (
               <View key={q.key}>
@@ -125,20 +121,14 @@ export default function GiveFeedback() {
         <Card style={{ padding: 16 }}>
           <Row justify="space-between">
             <Text style={type.h3}>What could we improve?</Text>
-            <Text style={[type.small, type.muted]}>Optional</Text>
           </Row>
-          <Text style={[type.small, type.muted, { marginBottom: 8 }]}>
-            Any bugs, confusing moments, or features you’d love? If something broke, tell us what happened.
-          </Text>
-          <Input multiline rows={4} maxLength={2000} value={comment} onChangeText={setComment}
-            placeholder="Your ideas" accessibilityLabel="What could we improve" />
+          <Input multiline rows={4} maxLength={2000} value={comment} onChangeText={setComment} onFocus={revealComment}
+            onContentSizeChange={revealComment} style={{ marginTop: 8 }}
+            placeholder="Bugs, confusing moments, features you’d love…" accessibilityLabel="What could we improve" />
         </Card>
 
-        {rating ? (
-          <Tile tone="mint" style={{ paddingVertical: 10, paddingHorizontal: 14 }}>
-            <Text style={[type.small, { color: colors.mintDark }]}>Your overall rating is ready. All other answers are optional.</Text>
-          </Tile>
-        ) : null}
+        {/* Room to scroll the comment box clear of the keyboard. */}
+        <View style={{ height: 120 }} />
       </Stack>
     </Screen>
   );

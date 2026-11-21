@@ -41,9 +41,6 @@ export default function InviteSheet({ potluck, visible, onClose, justCreated }: 
   return (
     <Dialog visible={visible} onClose={onClose} title={justCreated ? "Your showdown is live! 🎉" : "Invite people"}>
       <Stack gap={12} style={{ alignItems: "center" }}>
-        <Text style={[type.body, type.muted, { textAlign: "center" }]}>
-          Share the code or link. Guests can join right in their browser, and no download is needed.
-        </Text>
         <Tile tone="peach" style={{ alignSelf: "stretch", paddingVertical: 12, alignItems: "center" }}>
           <Text style={[type.caps, type.muted]}>Invite code</Text>
           <Text style={[type.code, { fontSize: 26, color: colors.ink }]} selectable>
@@ -53,7 +50,9 @@ export default function InviteSheet({ potluck, visible, onClose, justCreated }: 
         <View style={{ padding: 14, backgroundColor: colors.white, borderRadius: 16, borderWidth: 1, borderColor: colors.line }}>
           <QRCode value={url} size={168} color={colors.ink} backgroundColor={colors.white} />
         </View>
-        <Text style={[type.small, type.muted]}>Scan to join in person</Text>
+        <Text style={[type.small, type.bold, { textAlign: "center" }]}>
+          Scan with a phone camera to open this potluck in the browser. No app download needed.
+        </Text>
         <Stack gap={8} style={{ alignSelf: "stretch" }}>
           <Button size="lg" icon="share-social-outline" title="Share invite" onPress={share} />
           <Button

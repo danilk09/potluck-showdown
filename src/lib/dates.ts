@@ -12,6 +12,14 @@ export function formatWhen(t: any): string {
   return `${dateFmt.format(d)} · ${timeFmt.format(d)}`;
 }
 
+/** When a potluck starts: "Fri, Oct 2 · 6:30 PM", or "Fri, Oct 2 · Time TBD" while the hour is undecided. */
+export function potluckWhen(p: { startsAt?: any; timeTbd?: boolean } | null | undefined): string {
+  if (!p) return "";
+  if (!p.timeTbd) return formatWhen(p.startsAt);
+  const ms = toMillis(p.startsAt);
+  return ms ? `${dateFmt.format(new Date(ms))} · Time TBD` : "";
+}
+
 export function formatDate(t: any): string {
   const ms = toMillis(t);
   return ms ? longFmt.format(new Date(ms)) : "";

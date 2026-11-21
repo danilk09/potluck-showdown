@@ -14,6 +14,7 @@ export const scoredDishArgs = {
     dietary: v.array(v.string()),
     prepMinutes: v.union(v.number(), v.null()),
     calories: v.union(v.number(), v.null()),
+    protein: v.optional(v.union(v.number(), v.null())),
     photo: v.union(v.string(), v.null()),
     recipePhoto: v.union(v.string(), v.null()),
     usedRequired: v.boolean(),

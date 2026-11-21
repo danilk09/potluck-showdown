@@ -5,11 +5,13 @@ import { useAuth } from '../../../../hooks/AuthContext';
 import { useDishes, usePotluck } from '../../../../hooks/useFirestore';
 import { deleteDish, friendlyError, saveDish } from '../../../../data/api';
 import { COMMON_ALLERGENS, DIETARY_LABELS, formatInfo } from '../../../../lib/formats';
+import { dietaryConflicts } from '../../../../lib/dietary';
+import { toList } from '../../../../data/builders';
 import { phaseOf } from '../../../../lib/phase';
 import Avatar from '../../../../components/Avatar';
 import PhotoPicker from '../../../../components/PhotoPicker';
 import {
-  Button, Card, Checkbox, ChipToggleGroup, EmptyState, Field, Hint, Input, Label, LoadingScreen, PageHeader, RequiredNote, Row, Screen,
+  Button, Checkbox, ChipToggleGroup, EmptyState, Field, Hint, Input, Label, LoadingScreen, PageHeader, RequiredNote, Row, Screen,
   SelectField, Stack, Tile, useConfirm, useFormError, useToast,
 } from '../../../../components/ui';
 import { colors, type } from '../../../../theme';
@@ -24,6 +26,7 @@ const blank = {
   dietary: [] as string[],
   prepMinutes: '',
   calories: '',
+  protein: '',
   photo: null as string | null,
   photoData: null as string | null,
   recipePhoto: null as string | null,
@@ -40,6 +43,7 @@ function fromDish(d: any) {
     serves: String(d.serves ?? '').match(/\d+/)?.[0] ?? '',
     prepMinutes: d.prepMinutes != null ? String(d.prepMinutes) : '',
     calories: d.calories != null ? String(d.calories) : '',
+    protein: d.protein != null ? String(d.protein) : '',
   };
 }
 
@@ -104,22 +108,30 @@ function DishEditor({ potluck, dishes, existing, categoryId }: { potluck: any; d
   const persist = async () => {
     setBusy(true);
     try {
-      await saveDish(pid, form, existing, aiCategories.length > 0);
+      const id = await saveDish(pid, form, existing, aiCategories.length > 0);
       toast(existing ? 'Dish updated' : 'Dish added! 🎉');
-      router.back();
+      // With AI scoring, open the dish so its new health score is the first thing they see.
+      if (aiCategories.length) router.replace(`/potlucks/${pid}/dishes/${id}` as any);
+      else router.back();
     } catch (err) {
       showProblem({ title: 'Couldn’t save your dish', message: friendlyError(err) });
       setBusy(false);
     }
   };
 
-  const submit = () => {
+  const submit = async () => {
     if (busy) return;
     if (missing.length) {
       setChecked(true);
       showProblem({ missing });
       return;
     }
+    const clashes = dietaryConflicts(toList(form.ingredients), form.dietary);
+    if (clashes.length && !(await confirm({
+      title: 'Check your dietary labels',
+      body: clashes.map((c) => `“${c.label}” but the ingredients include ${c.word}.`).join('\n'),
+      confirmLabel: 'Save anyway',
+    }))) return;
     void persist();
   };
 
@@ -164,18 +176,21 @@ function DishEditor({ potluck, dishes, existing, categoryId }: { potluck: any; d
             <Text>{fmt.emoji}</Text>
           </View>
           <View style={{ flex: 1, minWidth: 0 }}>
-            <Text style={[type.body, type.bold]} numberOfLines={1}>{potluck.title}</Text>
-            <Text style={[type.small, type.muted]}>{fmt.blurb} Voters judge:</Text>
+            <Text style={[type.small, type.muted]} numberOfLines={1}>{potluck.title}</Text>
+            <Text style={[type.body, type.bold]}>How your dish will be judged</Text>
           </View>
         </Row>
-        <Row wrap gap={8}>
+        <Stack gap={6}>
           {potluck.scoring.map((c: any) => (
-            <View key={c.id} style={{ flexGrow: 1, flexBasis: '45%', backgroundColor: colors.white, borderRadius: 12, padding: 10 }}>
-              <Text style={[type.small, type.muted]}>{c.name} · {c.weight}%{c.mode === 'ai' ? ' · AI' : ''}</Text>
-              <Text style={[type.small, { fontWeight: '600' }]}>{c.mode === 'ai' ? 'Calculated when you save' : c.description}</Text>
-            </View>
+            <Row key={c.id} gap={10} align="flex-start">
+              <Text style={[type.body, type.heavy, { width: 48 }]}>{c.weight}%</Text>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={[type.body, type.bold]}>{c.name}</Text>
+                <Text style={[type.small, type.muted]}>{c.mode === 'ai' ? 'AI scores it from your ingredients when you save' : 'Guests rate it 1–5 stars'}</Text>
+              </View>
+            </Row>
           ))}
-        </Row>
+        </Stack>
         {potluck.formatDetail ? <Text style={[type.small, { marginTop: 8 }]}><Text style={type.bold}>{fmt.detailLabel}:</Text> {potluck.formatDetail}</Text> : null}
       </Tile>
 
@@ -186,7 +201,7 @@ function DishEditor({ potluck, dishes, existing, categoryId }: { potluck: any; d
         <Row gap={12} align="flex-start">
           <SelectField
             style={{ flex: 7 }}
-            label={potluck.format === 'courses' ? 'Bracket' : 'Category'}
+            label={potluck.format === 'courses' ? 'Course' : 'Category'}
             required
             value={form.categoryId}
             onChange={(v) => set('categoryId', v)}
@@ -195,16 +210,16 @@ function DishEditor({ potluck, dishes, existing, categoryId }: { potluck: any; d
               return { value: c.id, label: c.name, sub: left > 0 ? `${left} needed` : 'Full' };
             })}
           />
-          <Field style={{ flex: 5 }} label="Serves (people)" keyboardType="number-pad" inputMode="numeric" maxLength={3} placeholder="8"
+          <Field style={{ flex: 5 }} label="Serves" keyboardType="number-pad" inputMode="numeric" maxLength={3} placeholder="8"
             value={form.serves} onChangeText={(v) => set('serves', v.replace(/\D/g, ''))} />
         </Row>
 
         <PhotoPicker title="Add a photo of your dish" current={form.photo} pending={form.photoData}
           onPick={(d) => set('photoData', d)} onRemove={() => setForm((f: any) => ({ ...f, photo: null, photoData: null }))} />
 
-        <Field label="Ingredients" required invalid={checked && !form.ingredients.trim()} {...field('ingredients')} rows={4}
+        <Field label="Ingredients" required
+          invalid={checked && !form.ingredients.trim()} {...field('ingredients')} rows={4}
           placeholder={'One per line, or separated by commas\n8 oz wheat noodles\n2 tbsp sesame paste'} />
-        {aiCategories.length > 0 && <Hint>Include ingredient amounts for a more accurate health score.</Hint>}
         {needsRequired && (
           <Tile tone="gold" style={{ padding: 14 }}>
             <Checkbox checked={form.usedRequired} onChange={(v) => set('usedRequired', v)}>
@@ -214,18 +229,19 @@ function DishEditor({ potluck, dishes, existing, categoryId }: { potluck: any; d
         )}
 
         <View>
-          <Label style={{ marginBottom: 0 }}>Recipe</Label>
-          <Text style={[type.small, type.muted, { marginBottom: 6 }]}>Type or paste the steps. Guests can find this in their recipe bank later.</Text>
+          <Label>Recipe steps</Label>
           <Input {...field('steps')} rows={5} maxLength={8000} placeholder="1. Boil the noodles…" accessibilityLabel="Recipe" />
         </View>
         <PhotoPicker compact title="Or upload a photo of a recipe card" current={form.recipePhoto} pending={form.recipePhotoData}
           onPick={(d) => set('recipePhotoData', d)} onRemove={() => setForm((f: any) => ({ ...f, recipePhoto: null, recipePhotoData: null }))} />
 
         <Row gap={12} align="flex-start">
-          <Field style={{ flex: 1 }} label="Prep time (min)" keyboardType="number-pad" placeholder="30"
+          <Field style={{ flex: 1 }} label="Prep (min)" keyboardType="number-pad" placeholder="30"
             value={form.prepMinutes} onChangeText={(v) => set('prepMinutes', v.replace(/\D/g, ''))} />
-          <Field style={{ flex: 1 }} label="Calories / serving" keyboardType="number-pad" placeholder="Optional"
+          <Field style={{ flex: 1 }} label="Calories" keyboardType="number-pad" placeholder="per serving"
             value={form.calories} onChangeText={(v) => set('calories', v.replace(/\D/g, ''))} />
+          <Field style={{ flex: 1 }} label="Protein (g)" keyboardType="number-pad" placeholder="per serving"
+            value={form.protein} onChangeText={(v) => set('protein', v.replace(/\D/g, ''))} />
         </Row>
 
         <View>
@@ -246,15 +262,6 @@ function DishEditor({ potluck, dishes, existing, categoryId }: { potluck: any; d
             <Button size="sm" variant="outline" title="Add" onPress={addDietary} />
           </Row>
         </View>
-
-        <Card style={{ padding: 14 }}>
-          <Text style={[type.body, type.bold, { marginBottom: 6 }]}>Challenge tips</Text>
-          {[
-            'Choose whole ingredients, fresh flavors, and easy-to-share portions.',
-            'Highlight healthy swaps, seasonal picks, and allergen-friendly choices.',
-            'A clear photo helps people imagine the dish before tasting.',
-          ].map((t) => <Text key={t} style={[type.small, type.muted, { marginBottom: 4 }]}>• {t}</Text>)}
-        </Card>
 
         {missing.length === 0
           ? <Tile tone="mint" style={{ paddingVertical: 10, paddingHorizontal: 14 }}><Text style={[type.small, { color: colors.mintDark }]}>✓ All required details are complete.</Text></Tile>

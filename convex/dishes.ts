@@ -78,6 +78,11 @@ async function insertDish(
   await requireOwnImage(ctx, fields.photo, potluck._id, userId);
   await requireOwnImage(ctx, fields.recipePhoto, potluck._id, userId);
   const now = Date.now();
+  // The dish fills the spot its author was holding (the same category if they held one there).
+  const claims = potluck.spotClaims ?? [];
+  const held = claims.findIndex((c) => c.userId === userId && c.categoryId === fields.categoryId);
+  const any = held >= 0 ? held : claims.findIndex((c) => c.userId === userId);
+  if (any >= 0) await ctx.db.patch(potluck._id, { spotClaims: claims.filter((_, i) => i !== any) });
   return await ctx.db.insert("dishes", {
     ...fields,
     potluckId: potluck._id,
@@ -249,5 +254,45 @@ export const toggleLike = mutation({
       likedBy: hasLiked ? dish.likedBy.filter((id) => id !== user._id) : [...dish.likedBy, user._id],
     });
     return !hasLiked;
+  },
+});
+
+/** Saves a recipe to (or removes it from) the caller's "Saved" list in the recipe bank. */
+export const toggleSave = mutation({
+  args: { sessionToken: v.string(), dishId: v.string() },
+  returns: v.boolean(),
+  handler: async (ctx, args) => {
+    const user = await requireUser(ctx, args.sessionToken);
+    const dish = await getDish(ctx, args.dishId);
+    if (!dish) fail("Dish not found.");
+    requireMember(await requirePotluck(ctx, dish.potluckId), user);
+    const savedBy = dish.savedBy ?? [];
+    const saved = savedBy.includes(user._id);
+    await ctx.db.patch(dish._id, { savedBy: saved ? savedBy.filter((id) => id !== user._id) : [...savedBy, user._id] });
+    return !saved;
+  },
+});
+
+const REPORT_REASONS = ["Inappropriate photo", "Not food", "Spam or misleading", "Other"];
+
+/** Flags a dish photo for review. One report per person per dish. */
+export const report = mutation({
+  args: { sessionToken: v.string(), dishId: v.string(), reason: v.string() },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const user = await requireUser(ctx, args.sessionToken);
+    const dish = await getDish(ctx, args.dishId);
+    if (!dish) fail("Dish not found.");
+    requireMember(await requirePotluck(ctx, dish.potluckId), user);
+    if (!REPORT_REASONS.includes(args.reason)) fail("Pick a reason for the report.");
+    const earlier = await ctx.db
+      .query("reports")
+      .withIndex("by_dishId", (q) => q.eq("dishId", dish._id))
+      .collect();
+    if (earlier.some((r) => r.reporterId === user._id)) return null;
+    await ctx.db.insert("reports", {
+      reporterId: user._id, potluckId: dish.potluckId, dishId: dish._id, reason: args.reason, createdAt: Date.now(),
+    });
+    return null;
   },
 });

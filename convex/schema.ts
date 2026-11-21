@@ -54,6 +54,10 @@ export default defineSchema({
     description: v.optional(v.string()),
     location: v.optional(v.string()),
     startsAt: v.number(),
+    // The day is set but the hour isn't decided yet; startsAt holds a placeholder time.
+    timeTbd: v.optional(v.boolean()),
+    // Allergies or dietary needs the host wants every guest to see.
+    allergyNote: v.optional(v.string()),
     votingOpensAt: v.optional(v.union(v.number(), v.null())),
     votingClosesAt: v.optional(v.union(v.number(), v.null())),
     maxGuests: v.number(),
@@ -74,6 +78,8 @@ export default defineSchema({
         needed: v.number(),
       })
     ),
+    // Guests holding a spot in a category before they've decided on a dish.
+    spotClaims: v.optional(v.array(v.object({ userId: v.string(), categoryId: v.string() }))),
     coverImage: v.optional(v.union(v.string(), v.null())),
     // Optional physical prizes the host provides, for 1st/2nd/3rd place ("" = none).
     prizes: v.optional(v.array(v.string())),
@@ -113,6 +119,7 @@ export default defineSchema({
     dietary: v.array(v.string()),
     prepMinutes: v.optional(v.union(v.number(), v.null())),
     calories: v.optional(v.union(v.number(), v.null())),
+    protein: v.optional(v.union(v.number(), v.null())), // grams per serving
     photo: v.optional(v.union(v.string(), v.null())),
     recipePhoto: v.optional(v.union(v.string(), v.null())),
     usedRequired: v.boolean(),
@@ -120,6 +127,8 @@ export default defineSchema({
     aiScores: v.optional(v.any()),
     ratingCount: v.number(),
     likedBy: v.array(v.string()),
+    // People who saved this recipe to cook later (private to each of them).
+    savedBy: v.optional(v.array(v.string())),
     createdAt: v.number(),
     updatedAt: v.number(),
     // Identifies the scoring request that created this dish. Retries of that
@@ -181,4 +190,15 @@ export default defineSchema({
     comment: v.optional(v.string()),
     createdAt: v.number(),
   }).index("by_userId", ["userId"]),
+
+  // A guest flagging a dish photo as inappropriate. Reviewed in the Convex dashboard.
+  reports: defineTable({
+    reporterId: v.id("users"),
+    potluckId: v.string(),
+    dishId: v.string(),
+    reason: v.string(),
+    createdAt: v.number(),
+  })
+    .index("by_dishId", ["dishId"])
+    .index("by_reporterId", ["reporterId"]),
 });

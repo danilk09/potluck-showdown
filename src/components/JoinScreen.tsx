@@ -5,7 +5,7 @@ import { authErrorMessage, useAuth } from "../hooks/AuthContext";
 import { friendlyError, joinPotluck, lookupInvite } from "../data/api";
 import { normalizeInviteCode } from "../lib/inviteCode";
 import { formatInfo } from "../lib/formats";
-import { formatTime, formatWhen } from "../lib/dates";
+import { formatTime, potluckWhen } from "../lib/dates";
 import { PHASE_LABEL, phaseOf } from "../lib/phase";
 import { androidAppUrl, isWeb } from "../lib/platform";
 import { rememberReferrer } from "../lib/referral";
@@ -28,6 +28,7 @@ import {
   useFormError,
 } from "./ui";
 import { colors, type } from "../theme";
+import { clearNewAccount, markNewAccount } from "../lib/guide";
 
 /** Shown to signed-out visitors (usually opening an invite link). */
 function InviteGate({ code, from }: { code: string; from?: string }) {
@@ -51,8 +52,10 @@ function InviteGate({ code, from }: { code: string; from?: string }) {
     setBusy(true);
     setError("");
     try {
+      await markNewAccount();
       await signInGuest(name.trim());
     } catch (err: any) {
+      await clearNewAccount();
       setError(authErrorMessage(err));
       setBusy(false);
     }
@@ -134,13 +137,13 @@ function Preview({ potluck, onJoin, busy }: { potluck: any; onJoin: () => void; 
         <HeroCard style={{ borderRadius: 0 }}>
           <Chip tone="default">{`${fmt.emoji} ${fmt.label}`}</Chip>
           <Text style={[type.h2, { color: colors.white, marginTop: 8, marginBottom: 4 }]}>{potluck.title}</Text>
-          <Text style={[type.body, type.bold, { color: colors.heroSub }]}>{potluck.theme || fmt.blurb}</Text>
+          <Text style={[type.body, type.bold, { color: colors.heroSub }]}>{potluck.theme ? `Theme: ${potluck.theme}` : fmt.blurb}</Text>
         </HeroCard>
         <Stack gap={14} style={{ padding: 16 }}>
           <Row justify="space-between" align="flex-start">
             <AuthorLine uid={potluck.hostId} sub="Host" />
             <View style={{ alignItems: "flex-end", maxWidth: "50%" }}>
-              <Text style={[type.small, type.bold]}>{formatWhen(potluck.startsAt)}</Text>
+              <Text style={[type.small, type.bold]}>{potluckWhen(potluck)}</Text>
               <Text style={[type.small, type.muted]} numberOfLines={1}>
                 {potluck.location}
               </Text>
@@ -213,7 +216,7 @@ function Preview({ potluck, onJoin, busy }: { potluck: any; onJoin: () => void; 
               🥗 Join now, then claim the dish you want to bring.
             </Text>
           </Tile>
-          <Button size="lg" title={busy ? "Joining…" : "Join Challenge"} loading={busy} onPress={onJoin} />
+          <Button size="lg" title={busy ? "Joining…" : "Join potluck"} loading={busy} onPress={onJoin} />
         </>
       )}
     </Stack>

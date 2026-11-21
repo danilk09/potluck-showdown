@@ -5,6 +5,7 @@ import { authErrorMessage, useAuth } from '../../hooks/AuthContext';
 import AuthShell from '../../components/AuthShell';
 import { Button, Field, PageHeader, Row, Stack, useFormError } from '../../components/ui';
 import { type } from '../../theme';
+import { clearNewAccount, markNewAccount } from '../../lib/guide';
 
 export default function SignUp() {
   const { signUp } = useAuth();
@@ -34,8 +35,10 @@ export default function SignUp() {
     }
     setBusy(true);
     try {
+      await markNewAccount();
       await signUp(form.name.trim(), form.email.trim(), form.password);
     } catch (err) {
+      await clearNewAccount();
       showProblem({ title: 'Couldn’t create your account', message: authErrorMessage(err) });
       setBusy(false);
     }

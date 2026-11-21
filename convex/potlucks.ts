@@ -157,6 +157,7 @@ export const leave = mutation({
         await ctx.db.delete(d._id);
       }
     }
+    await ctx.db.patch(potluck._id, { spotClaims: (potluck.spotClaims ?? []).filter((c) => c.userId !== user._id) });
     await setMembers(ctx, potluck, potluck.memberIds.filter((id) => id !== user._id));
   },
 });
@@ -169,7 +170,50 @@ export const removeGuest = mutation({
     requireHost(potluck, user);
     if (potluck.status === "closed") fail("Results are final, so the guest list can’t change.");
     if (args.guestId === potluck.hostId) fail("The host can’t be removed.");
+    await ctx.db.patch(potluck._id, { spotClaims: (potluck.spotClaims ?? []).filter((c) => c.userId !== args.guestId) });
     await setMembers(ctx, potluck, potluck.memberIds.filter((id) => id !== args.guestId));
+  },
+});
+
+/**
+ * Holds a spot in a dish category for the caller before they've decided what to make
+ * ("I'll bring a dessert"). Adding a dish later fills the spot.
+ */
+export const claimSpot = mutation({
+  args: { sessionToken: v.string(), potluckId: v.string(), categoryId: v.string() },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const user = await requireUser(ctx, args.sessionToken);
+    const potluck = await requirePotluck(ctx, args.potluckId);
+    if (!isMember(potluck, user._id)) fail("You need to join this potluck first.");
+    if (!dishesEditable(potluck)) fail("Voting has started, so spots are locked.");
+    const category = potluck.dishCategories.find((c) => c.id === args.categoryId);
+    if (!category) fail("Pick one of this potluck's dish categories.");
+    const claims = potluck.spotClaims ?? [];
+    if (claims.some((c) => c.userId === user._id && c.categoryId === category.id)) return null;
+    const dishes = await ctx.db
+      .query("dishes")
+      .withIndex("by_potluckId", (q) => q.eq("potluckId", potluck._id))
+      .collect();
+    const taken = dishes.filter((d) => d.categoryId === category.id).length
+      + claims.filter((c) => c.categoryId === category.id).length;
+    if (taken >= category.needed) fail(`${category.name} is already covered.`);
+    await ctx.db.patch(potluck._id, { spotClaims: [...claims, { userId: user._id, categoryId: category.id }], updatedAt: Date.now() });
+    return null;
+  },
+});
+
+/** Gives back a spot the caller was holding. */
+export const releaseSpot = mutation({
+  args: { sessionToken: v.string(), potluckId: v.string(), categoryId: v.string() },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const user = await requireUser(ctx, args.sessionToken);
+    const potluck = await requirePotluck(ctx, args.potluckId);
+    const claims = potluck.spotClaims ?? [];
+    const next = claims.filter((c) => !(c.userId === user._id && c.categoryId === args.categoryId));
+    if (next.length !== claims.length) await ctx.db.patch(potluck._id, { spotClaims: next, updatedAt: Date.now() });
+    return null;
   },
 });
 

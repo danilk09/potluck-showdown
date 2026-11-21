@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { AccessibilityInfo, Animated, Easing, Linking, Modal, StyleSheet, Text, View } from "react-native";
-import { aiScoreOnFive } from "../lib/healthScore";
 import { colors, radius, shadow, type } from "../theme";
 import { Button, Icon, Row } from "./ui";
 
@@ -49,18 +48,20 @@ export function HealthScoreMeter({
           <View style={styles.icon}>
             <Icon name="sparkles" size={16} color={colors.mintDark} />
           </View>
-          <Text style={[type.h4, { flex: 1 }]} numberOfLines={1}>{title}</Text>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={type.h4}>{title}</Text>
+            <Text style={[type.small, type.muted]}>AI score from this dish’s ingredients</Text>
+          </View>
         </Row>
-        <View style={styles.pill}>
-          <Text style={[type.caps, { color: colors.mintDark }]}>AI</Text>
-        </View>
       </Row>
       {score == null ? (
         <Text style={[type.body, { marginTop: 8 }]}>No health score on this dish yet.</Text>
       ) : (
         <View style={{ marginTop: 6 }} accessibilityLiveRegion="polite">
-          <Text style={styles.number}>{score}</Text>
-          <Text style={[type.small, type.muted]}>out of 100</Text>
+          <Text style={styles.number}>
+            {score}
+            <Text style={[type.h3, type.muted]}> / 100</Text>
+          </Text>
           <View
             style={styles.track}
             accessibilityRole="progressbar"
@@ -71,9 +72,6 @@ export function HealthScoreMeter({
               width: fill.interpolate({ inputRange: [0, 100], outputRange: ["0%", "100%"] }),
             }]} />
           </View>
-          <Text style={[type.small, { marginTop: 8 }]}>
-            Counts as <Text style={type.bold}>{aiScoreOnFive(score).toFixed(1)} / 5</Text> in the weighted total.
-          </Text>
           <Text style={[type.small, type.muted, { marginTop: 4 }]}>
             Nutrition sources include USDA FoodData Central and{" "}
             <Text
@@ -96,7 +94,8 @@ export function HealthScoreModal({ title, onClose }: { title: string; onClose: (
     <Modal visible transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
       <View style={styles.backdrop}>
         <View style={styles.sheet}>
-          <Text style={[type.small, type.muted, { marginBottom: 8 }]}>Sample score</Text>
+          <Text style={[type.h4, { marginBottom: 2 }]}>Example only</Text>
+          <Text style={[type.small, type.muted, { marginBottom: 10 }]}>Each dish gets its own score when its cook adds the ingredients.</Text>
           <HealthScoreMeter title={title} score={82} />
           <Button title="Close" onPress={onClose} style={{ marginTop: 12 }} />
         </View>

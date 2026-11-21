@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { Text, View } from "react-native";
 import { dismissFeedbackPrompt, friendlyError, submitFeedback } from "../data/api";
-import { Banner, Button, Chip, ChipToggleGroup, Dialog, Icon, Input, Label, Row, Stack, StarRating, useToast } from "./ui";
-import { colors, type } from "../theme";
+import { Banner, Button, Chip, ChipToggleGroup, Dialog, Input, Label, Row, Stack, StarRating, useToast } from "./ui";
+import { type } from "../theme";
 
 const RATING_REASONS = ["Easy to use", "Fun challenges", "Voting was unclear", "App issues"];
 
@@ -51,12 +51,7 @@ export default function FeedbackPrompt({ potluckIds, onDone }: { potluckIds: str
             <Chip tone="green" icon="checkmark">{`Your rating: ${rating} / 5`}</Chip>
           </View>
         ) : (
-          <>
-            <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: colors.lilacSoft, alignItems: "center", justifyContent: "center" }}>
-              <Icon name="chatbubble-outline" size={22} color={colors.coral} />
-            </View>
-            <Text style={[type.body, type.muted]}>A quick rating helps us make your next potluck even better.</Text>
-          </>
+          <Text style={[type.body, type.muted]}>A quick rating helps us make your next potluck even better.</Text>
         )}
         <View>
           <StarRating label="Rate your experience" value={rating} onChange={setRating} />
@@ -73,16 +68,13 @@ export default function FeedbackPrompt({ potluckIds, onDone }: { potluckIds: str
           </>
         ) : (
           <>
+            <Text style={type.h3}>Want to tell us why?</Text>
             <View>
-              <Text style={type.h3}>Want to tell us why?</Text>
-              <Text style={[type.small, type.muted]}>Totally optional. Pick a reason, add a note, or just send your rating.</Text>
-            </View>
-            <View>
-              <Label>What shaped your rating? · Optional</Label>
+              <Label>What shaped your rating?</Label>
               <ChipToggleGroup options={RATING_REASONS} value={reasons} onChange={setReasons} warn />
             </View>
             <View>
-              <Label>Anything else? · Optional</Label>
+              <Label>Anything else?</Label>
               <Input multiline rows={3} maxLength={2000} value={comment} onChangeText={setComment}
                 placeholder="Tell us what worked or what didn’t" accessibilityLabel="Anything else" />
             </View>

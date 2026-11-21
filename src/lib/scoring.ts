@@ -117,3 +117,8 @@ export function toMillis(t: any): number {
   if (typeof t.seconds === "number") return t.seconds * 1000;
   return 0;
 }
+
+/** Dishes in the order the food feed and the rating screen's arrows use: newest first. */
+export function feedOrder<T extends { createdAt?: any }>(dishes: T[]): T[] {
+  return [...dishes].sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
+}

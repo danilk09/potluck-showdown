@@ -1,18 +1,21 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
-import { router } from 'expo-router';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { router, useFocusEffect } from 'expo-router';
 import { useAuth } from '../../../hooks/AuthContext';
 import { useMyPotlucks, useNow } from '../../../hooks/useFirestore';
 import Avatar from '../../../components/Avatar';
 import PotluckCard from '../../../components/PotluckCard';
 import GetAppBanner from '../../../components/GetAppBanner';
+import GuideSlides from '../../../components/GuideSlides';
+import { loadDrafts } from '../../../components/PotluckForm';
 import { Button, Dialog, EmptyState, Icon, Loading, Row, Screen, SectionTitle, Stack, Tile } from '../../../components/ui';
 import { phaseOf } from '../../../lib/phase';
 import { toMillis } from '../../../lib/scoring';
 import FeedbackPrompt from '../../../components/FeedbackPrompt';
 import JoinDialog from '../../../components/JoinDialog';
 import { colors, type } from '../../../theme';
+import { takeNewAccountGuide } from '../../../lib/guide';
+import { potluckWhen } from '../../../lib/dates';
 
 const TIPS = [
   'Claim a dish early and become everyone’s favorite guest.',
@@ -37,22 +40,25 @@ export default function Home() {
   const [feedbackHandled, setFeedbackHandled] = useState<string[]>([]);
 
   const uid = user?.uid || '';
+  const [draftCount, setDraftCount] = useState(0);
+  // Potluck drafts saved on this device; re-read whenever Home comes back into view.
+  useFocusEffect(useCallback(() => {
+    let alive = true;
+    if (uid) loadDrafts(uid).then((d) => { if (alive) setDraftCount(d.length); });
+    return () => { alive = false; };
+  }, [uid]));
 
+  // Only a brand-new account sees the walkthrough on its own; signing in again doesn't.
   useEffect(() => {
     if (!uid) return;
     let alive = true;
-    AsyncStorage.getItem(`ps-guide-seen-${uid}`).then((seen) => {
-      if (alive && !seen) setGuideStep(0);
-    }).catch(() => {});
+    takeNewAccountGuide().then((show) => {
+      if (alive && show) setGuideStep(0);
+    });
     return () => { alive = false; };
   }, [uid]);
 
-  const finishGuide = () => {
-    setGuideStep(-1);
-    if (uid) {
-      AsyncStorage.setItem(`ps-guide-seen-${uid}`, '1').catch(() => {});
-    }
-  };
+  const finishGuide = () => setGuideStep(-1);
 
   const live = potlucks.filter((p) => phaseOf(p, now) === 'voting');
   // "Upcoming" = not finished and not more than a day in the past.
@@ -70,16 +76,12 @@ export default function Home() {
       {guideStep < 0 && feedbackFor.length > 0 && (
         <FeedbackPrompt potluckIds={feedbackFor} onDone={() => setFeedbackHandled((h) => [...h, ...feedbackFor])} />
       )}
-      <Dialog visible={guideStep >= 0} title={GUIDE[guideStep]?.title} onClose={finishGuide}
+      <Dialog visible={guideStep >= 0} title="How it works" onClose={finishGuide}
         footer={<>
           <Button title="Skip" variant="linkMuted" onPress={finishGuide} />
-          <Button title={guideStep === GUIDE.length - 1 ? 'Done' : 'Next'} onPress={() => guideStep === GUIDE.length - 1 ? finishGuide() : setGuideStep(guideStep + 1)} />
+          <Button title={guideStep === GUIDE.length - 1 ? 'Done' : 'Next'} iconRight={guideStep === GUIDE.length - 1 ? undefined : 'arrow-forward'} onPress={() => guideStep === GUIDE.length - 1 ? finishGuide() : setGuideStep(guideStep + 1)} />
         </>}>
-        <View style={{ alignItems: 'center', paddingVertical: 16, gap: 12 }}>
-          <Icon name={(GUIDE[guideStep]?.icon || 'sparkles-outline') as any} size={54} color={colors.coral} />
-          <Text style={[type.body, { textAlign: 'center' }]}>{GUIDE[guideStep]?.body}</Text>
-          <Text style={[type.small, type.muted]}>{guideStep + 1} of {GUIDE.length}</Text>
-        </View>
+        {guideStep >= 0 && <GuideSlides slides={GUIDE} step={guideStep} onStep={setGuideStep} />}
       </Dialog>
       <Row justify="space-between" style={{ marginBottom: 16 }}>
         <Text style={[type.h4, type.heavy, { fontSize: 19 }]}>Potluck Showdown</Text>
@@ -87,6 +89,21 @@ export default function Home() {
           <Avatar uid={uid} profile={profile} size={44} />
         </Pressable>
       </Row>
+      {live.map((p) => (
+        <Tile key={p.id} tone="gold" onPress={() => router.push({ pathname: '/feed', params: { pid: p.id } })}
+          style={{ padding: 16, marginBottom: 12, borderWidth: 2, borderColor: colors.goldLine }}>
+          <Row gap={12}>
+            <Text style={{ fontSize: 30 }}>🗳️</Text>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={[type.caps, { color: colors.coralDark }]}>Happening now · voting is open</Text>
+              <Text style={type.h3}>{p.title}</Text>
+              <Text style={[type.small, type.muted]}>{p.location || potluckWhen(p)}</Text>
+            </View>
+          </Row>
+          <Button size="md" variant="dark" icon="star" title="Rate the dishes" style={{ marginTop: 12 }}
+            onPress={() => router.push({ pathname: '/feed', params: { pid: p.id } })} />
+        </Tile>
+      ))}
       <GetAppBanner />
       <Button variant="link" icon="help-circle-outline" title="How it works" style={{ alignSelf: 'flex-start', marginBottom: 12 }} onPress={() => setGuideStep(0)} />
 
@@ -98,15 +115,10 @@ export default function Home() {
         <Button style={{ flex: 1 }} size="lg" icon="add" title="Create Potluck" onPress={() => router.push('/create')} />
         <Button style={{ flex: 1 }} size="lg" variant="outline" title="Join Potluck" onPress={() => setJoining(true)} />
       </Row>
-
-      {live.map((p) => (
-        <Tile key={p.id} tone="gold" onPress={() => router.push({ pathname: '/feed', params: { pid: p.id } })}
-          style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, marginBottom: 12 }}>
-          <Text style={{ fontSize: 26 }}>🗳️</Text>
-          <Text style={[type.body, { flex: 1 }]}><Text style={type.bold}>Voting is open</Text> at {p.title}. Rate the dishes!</Text>
-          <Icon name="chevron-forward" />
-        </Tile>
-      ))}
+      {draftCount > 0 && (
+        <Button variant="soft" icon="document-text-outline" title={`Continue a draft (${draftCount})`}
+          style={{ marginTop: -12, marginBottom: 24 }} onPress={() => router.push('/create')} />
+      )}
 
       <SectionTitle right={<Button variant="link" title="See all" onPress={() => router.push('/events')} />}>Upcoming potlucks</SectionTitle>
 

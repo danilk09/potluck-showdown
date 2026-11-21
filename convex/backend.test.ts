@@ -275,11 +275,55 @@ describe("potluck rules", () => {
     await t.mutation(api.potlucks.update, {
       sessionToken: host.token,
       potluckId,
-      form: { votingOpensAt: Date.now() - 10_000, votingClosesAt: Date.now() - 5_000 },
+      form: { startsAt: Date.now() - 60_000, votingOpensAt: Date.now() - 10_000, votingClosesAt: Date.now() - 5_000 },
     });
     await expect(
       t.mutation(api.voting.submitBallot, { sessionToken: guest.token, potluckId, dishId, scores: { c0: 4, c1: 4 } }),
     ).rejects.toThrow(/not currently open/);
+  });
+
+  test("voting can't be scheduled before the potluck starts, unless the start time is undecided", async () => {
+    const { t, host, potluckId } = await setup();
+    const startsAt = Date.now() + 86_400_000;
+    await expect(
+      t.mutation(api.potlucks.update, { sessionToken: host.token, potluckId, form: { startsAt, votingOpensAt: startsAt - 3_600_000 } }),
+    ).rejects.toThrow(/before the potluck starts/);
+    await t.mutation(api.potlucks.update, { sessionToken: host.token, potluckId, form: { startsAt, votingOpensAt: startsAt + 3_600_000 } });
+    await t.mutation(api.potlucks.update, {
+      sessionToken: host.token, potluckId, form: { startsAt, timeTbd: true, votingOpensAt: startsAt - 3_600_000 },
+    });
+    const potluck = await t.query(api.potlucks.get, { sessionToken: host.token, potluckId });
+    expect(potluck).toMatchObject({ timeTbd: true });
+  });
+
+  test("guests can hold a spot, and adding a dish fills it", async () => {
+    const { t, guest, potluckId } = await setup();
+    const before = await t.query(api.potlucks.get, { sessionToken: guest.token, potluckId });
+    const categoryId = before!.dishCategories[0].id;
+    await t.mutation(api.potlucks.claimSpot, { sessionToken: guest.token, potluckId, categoryId });
+    // Holding the same spot twice is a no-op.
+    await t.mutation(api.potlucks.claimSpot, { sessionToken: guest.token, potluckId, categoryId });
+    let potluck = await t.query(api.potlucks.get, { sessionToken: guest.token, potluckId });
+    expect(potluck!.spotClaims).toEqual([{ userId: guest.id, categoryId }]);
+
+    await t.mutation(api.dishes.claim, { sessionToken: guest.token, potluckId, form: { ...dishForm(), categoryId } });
+    potluck = await t.query(api.potlucks.get, { sessionToken: guest.token, potluckId });
+    expect(potluck!.spotClaims).toEqual([]);
+  });
+
+  test("members can save and report dishes", async () => {
+    const { t, host, guest, outsider, potluckId } = await setup();
+    const dishId = await t.mutation(api.dishes.claim, { sessionToken: host.token, potluckId, form: dishForm() });
+    expect(await t.mutation(api.dishes.toggleSave, { sessionToken: guest.token, dishId })).toBe(true);
+    expect((await t.query(api.dishes.get, { sessionToken: guest.token, dishId }))!.savedBy).toEqual([guest.id]);
+    expect(await t.mutation(api.dishes.toggleSave, { sessionToken: guest.token, dishId })).toBe(false);
+
+    await t.mutation(api.dishes.report, { sessionToken: guest.token, dishId, reason: "Not food" });
+    await t.mutation(api.dishes.report, { sessionToken: guest.token, dishId, reason: "Not food" });
+    await expect(t.mutation(api.dishes.report, { sessionToken: guest.token, dishId, reason: "whatever" })).rejects.toThrow(/reason/);
+    await expect(t.mutation(api.dishes.report, { sessionToken: outsider.token, dishId, reason: "Other" })).rejects.toThrow(/join/);
+    const reports = await t.run((ctx) => ctx.db.query("reports").collect());
+    expect(reports).toHaveLength(1);
   });
 
   test("dishes lock once voting starts", async () => {

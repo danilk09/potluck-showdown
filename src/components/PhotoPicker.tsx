@@ -25,7 +25,7 @@ export default function PhotoPicker({
   onPick,
   onRemove,
   title,
-  hint = "Optional · JPG or PNG",
+  hint = "JPG or PNG",
   compact = false,
 }: PhotoPickerProps) {
   const [busy, setBusy] = useState(false);

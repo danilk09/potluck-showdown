@@ -50,14 +50,14 @@ export function formatInfo(key?: string | null): FormatInfo {
 }
 
 export const DEFAULT_SCORING = [
-  { id: "c0", name: "Deliciousness", description: "Flavor, taste, and how much you’d want another bite.", weight: 60 },
-  { id: "c1", name: "Healthiness", description: "Whole ingredients, balance, and nutrition.", weight: 40, mode: "manual" },
+  { id: "c0", name: "Deliciousness", description: "Flavor, taste, and how much you’d want another bite.", weight: 50 },
+  { id: "c1", name: "Healthiness", description: "Whole ingredients, balance, and nutrition.", weight: 50, mode: "manual" },
 ];
 
 export const SCORING_SUGGESTIONS = [
   { name: "Creativity", description: "Originality and how unique the dish feels." },
   { name: "Presentation", description: "Plating, color, and first impressions." },
-  { name: "Theme fit", description: "How well the dish fits the challenge." },
+  { name: "Theme fit", description: "How well the dish fits the potluck’s theme." },
   { name: "Healthiness", description: "Whole ingredients, balance, and nutrition." },
   { name: "Deliciousness", description: "Flavor, taste, and how much you’d want another bite." },
 ];

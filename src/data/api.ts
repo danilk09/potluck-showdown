@@ -156,10 +156,12 @@ export async function publishResults(potluck: any): Promise<void> {
 
 // ---------- dishes ----------
 
-export async function saveDish(potluckId: string, form: any, existing?: any, scoreHealth = false): Promise<void> {
+/** Saves a dish and returns its id. */
+export async function saveDish(potluckId: string, form: any, existing?: any, scoreHealth = false): Promise<string> {
   const t = await token();
   const values = { ...form };
   const uploaded: string[] = [];
+  let dishId: string;
   try {
     for (const key of ["photo", "recipePhoto"]) {
       const pending = form[`${key}Data`];
@@ -171,16 +173,16 @@ export async function saveDish(potluckId: string, form: any, existing?: any, sco
     const fields = dishFields(values);
     if (scoreHealth) {
       // Potlucks with AI health scoring save through the scoring action.
-      await convex.action(api.dishHealth.calculateAndSave, {
+      dishId = await convex.action(api.dishHealth.calculateAndSave, {
         sessionToken: t,
         potluckId: potluckId as Id<"potlucks">,
         ...(existing ? { dishId: existing.id } : {}),
         form: fields,
       });
     } else if (existing) {
-      await convex.mutation(api.dishes.update, { sessionToken: t, dishId: existing.id, form: fields });
+      dishId = await convex.mutation(api.dishes.update, { sessionToken: t, dishId: existing.id, form: fields });
     } else {
-      await convex.mutation(api.dishes.claim, { sessionToken: t, potluckId, form: fields });
+      dishId = await convex.mutation(api.dishes.claim, { sessionToken: t, potluckId, form: fields });
     }
   } catch (err) {
     await Promise.all(uploaded.map(discardUpload));
@@ -190,6 +192,7 @@ export async function saveDish(potluckId: string, form: any, existing?: any, sco
   for (const key of ["photo", "recipePhoto"]) {
     if (existing?.[key] && existing[key] !== values[key]) forgetImage(existing[key]);
   }
+  return dishId;
 }
 
 export async function recalculateDishHealth(potluckId: string, dishId: string): Promise<void> {
@@ -210,6 +213,24 @@ export async function deleteDish(potluckId: string, dish: any): Promise<void> {
 export async function toggleLike(potluckId: string, dishId: string, _liked: boolean): Promise<boolean> {
   const t = await token();
   return (await convex.mutation(api.dishes.toggleLike, { sessionToken: t, dishId })) ?? false;
+}
+
+/** Saves a recipe to the caller's "Saved" list, or removes it. Returns whether it's saved now. */
+export async function toggleSave(dishId: string): Promise<boolean> {
+  return await convex.mutation(api.dishes.toggleSave, { sessionToken: await token(), dishId });
+}
+
+export async function reportDish(dishId: string, reason: string): Promise<void> {
+  await convex.mutation(api.dishes.report, { sessionToken: await token(), dishId, reason });
+}
+
+/** Holds a spot in a dish category before deciding what to bring. */
+export async function claimSpot(potluckId: string, categoryId: string): Promise<void> {
+  await convex.mutation(api.potlucks.claimSpot, { sessionToken: await token(), potluckId, categoryId });
+}
+
+export async function releaseSpot(potluckId: string, categoryId: string): Promise<void> {
+  await convex.mutation(api.potlucks.releaseSpot, { sessionToken: await token(), potluckId, categoryId });
 }
 
 /** Anonymous vote */

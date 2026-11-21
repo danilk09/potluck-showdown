@@ -3,7 +3,7 @@ import { Pressable, Text, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '../../../../../../hooks/AuthContext';
 import { useDocData, useMyRatings, usePotluck } from '../../../../../../hooks/useFirestore';
-import { friendlyError, recalculateDishHealth, toggleLike } from '../../../../../../data/api';
+import { friendlyError, recalculateDishHealth, toggleLike, toggleSave } from '../../../../../../data/api';
 import { HealthScoreMeter } from '../../../../../../components/HealthScoreMeter';
 import { healthPoints } from '../../../../../../lib/healthScore';
 import { phaseOf } from '../../../../../../lib/phase';
@@ -13,7 +13,7 @@ import { formatServes } from '../../../../../../lib/formats';
 import { shareLink, tapFeedback } from '../../../../../../lib/platform';
 import { AuthorLine } from '../../../../../../components/Avatar';
 import {
-  Button, Card, Chip, EmptyState, FsImage, Icon, IconButton, LoadingScreen, PageHeader, ProgressBar, Row, Screen, Stars, Tile, useToast,
+  Button, Card, Chip, EmptyState, Facts, FsImage, Icon, IconButton, LoadingScreen, PageHeader, ProgressBar, Row, Screen, Stars, Tile, useToast,
 } from '../../../../../../components/ui';
 import { colors, type } from '../../../../../../theme';
 
@@ -42,6 +42,7 @@ export default function DishDetail() {
   const mine = dish.authorId === uid;
   const myRating = ratings.get(dish.id);
   const liked = Boolean(dish.likedBy?.includes(uid));
+  const saved = Boolean(dish.savedBy?.includes(uid));
   const category = potluck.dishCategories.find((c: any) => c.id === dish.categoryId);
   const overall = overallScore(dish, potluck.scoring);
   const aiScoring = potluck.scoring.filter((c: any) => c.mode === 'ai');
@@ -69,6 +70,15 @@ export default function DishDetail() {
     }
   };
 
+  const save = async () => {
+    tapFeedback();
+    try {
+      toast((await toggleSave(dish.id)) ? 'Saved. Find it under Saved in the Recipes tab.' : 'Removed from saved recipes');
+    } catch (err) {
+      toast(friendlyError(err), 'danger');
+    }
+  };
+
   // Sharing text only. Recipes stay private to attendees, so no link is shared.
   const share = async () => {
     const text = `${dish.name}\n\nIngredients:\n${(dish.ingredients ?? []).map((i: string) => `• ${i}`).join('\n')}${dish.steps ? `\n\nSteps:\n${dish.steps}` : ''}`;
@@ -78,7 +88,13 @@ export default function DishDetail() {
 
   return (
     <Screen>
-      <PageHeader title="Recipe" actions={<IconButton name="share-social-outline" color={colors.coral} onPress={share} accessibilityLabel="Share recipe" />} />
+      <PageHeader title="Recipe" actions={(
+        <Row gap={4}>
+          <Button size="sm" variant={saved ? 'soft' : 'outline'} icon={saved ? 'bookmark' : 'bookmark-outline'} title={saved ? 'Saved' : 'Save'}
+            accessibilityLabel={saved ? 'Remove from saved recipes' : 'Save recipe'} onPress={save} />
+          <IconButton name="share-social-outline" color={colors.coral} onPress={share} accessibilityLabel="Share recipe" />
+        </Row>
+      )} />
       <Card style={{ overflow: 'hidden', marginBottom: 16 }}>
         <View style={{ aspectRatio: 16 / 10 }}><FsImage src={dish.photo} accessibilityLabel={dish.name} /></View>
         <View style={{ padding: 14 }}>
@@ -87,6 +103,16 @@ export default function DishDetail() {
             {dish.dietary?.map((d: string) => <Chip key={d} tone="green">{d}</Chip>)}
           </Row>
           <Text style={[type.h2, { marginBottom: 8 }]} selectable>{dish.name}</Text>
+          <Facts style={{ marginBottom: 12 }} items={[
+            { label: 'Calories', value: dish.calories != null ? `${dish.calories} kcal` : '—' },
+            { label: 'Protein', value: dish.protein != null ? `${dish.protein} g` : '—' },
+            ...aiScoring.map((c: any) => {
+              const points = healthPoints(dish, c.id);
+              return { label: c.name, value: points != null ? `${points}/100` : '—', tone: 'good' as const };
+            }),
+            { label: 'Serves', value: formatServes(dish.serves) },
+            { label: 'Prep', value: dish.prepMinutes != null ? `${dish.prepMinutes} min` : '—' },
+          ]} />
           <Row justify="space-between" gap={8}>
             <AuthorLine uid={dish.authorId} sub={`${potluck.title} · ${formatDate(potluck.startsAt)}`} />
             <Pressable onPress={like} accessibilityRole="button" accessibilityLabel={liked ? 'Unlike' : 'Like'} hitSlop={8}
@@ -96,18 +122,6 @@ export default function DishDetail() {
             </Pressable>
           </Row>
         </View>
-        <Row gap={0} style={{ borderTopWidth: 1, borderTopColor: colors.line }}>
-          {[
-            ['Serves', formatServes(dish.serves)],
-            ['Prep', dish.prepMinutes != null ? `${dish.prepMinutes} min` : '—'],
-            ['Calories', dish.calories != null ? `${dish.calories} kcal` : '—'],
-          ].map(([label, value], i) => (
-            <View key={label} style={{ flex: 1, padding: 10, alignItems: 'center', borderLeftWidth: i ? 1 : 0, borderLeftColor: colors.line }}>
-              <Text style={[type.small, type.muted]}>{label}</Text>
-              <Text style={[type.small, type.bold]} numberOfLines={1}>{value}</Text>
-            </View>
-          ))}
-        </Row>
       </Card>
 
       {aiScoring.length > 0 && (
@@ -150,7 +164,7 @@ export default function DishDetail() {
       {phase === 'closed' && (
         <Card style={{ padding: 14, marginBottom: 16 }}>
           <Row justify="space-between" style={{ marginBottom: 8 }}>
-            <Text style={type.h4}>Final score</Text>
+            <Text style={type.h4}>Final score (out of 5)</Text>
             <Stars value={overall} />
           </Row>
           {potluck.scoring.map((c: any) => {
@@ -160,8 +174,8 @@ export default function DishDetail() {
             return (
               <View key={c.id} style={{ marginBottom: 10 }}>
                 <Row justify="space-between" style={{ marginBottom: 4 }}>
-                  <Text style={type.small}>{c.name}{c.mode === 'ai' ? ' · AI' : ''}</Text>
-                  <Text style={[type.small, type.bold]}>{c.mode === 'ai' ? (points == null ? '—' : String(points)) : avg != null ? avg.toFixed(1) : '—'}</Text>
+                  <Text style={type.small}>{c.name}{c.mode === 'ai' ? ' (AI)' : ' (guest votes)'} · {c.weight}% of score</Text>
+                  <Text style={[type.small, type.bold]}>{c.mode === 'ai' ? (points == null ? '—' : `${points}/100`) : avg != null ? `${avg.toFixed(1)}/5` : '—'}</Text>
                 </Row>
                 <ProgressBar value={bar} color={c.mode === 'ai' ? colors.mint : colors.gold} />
               </View>
@@ -189,7 +203,7 @@ export default function DishDetail() {
       </Card>
 
       <Card style={{ padding: 14 }}>
-        <Text style={[type.h4, { marginBottom: 6 }]}>Recipe</Text>
+        <Text style={[type.h4, { marginBottom: 6 }]}>Steps</Text>
         {dish.steps ? <Text style={type.body} selectable>{dish.steps}</Text> : <Text style={[type.small, type.muted]}>No written steps were added.</Text>}
         {dish.recipePhoto && (
           <View style={{ marginTop: 12, borderRadius: 12, overflow: 'hidden', aspectRatio: 3 / 4 }}>

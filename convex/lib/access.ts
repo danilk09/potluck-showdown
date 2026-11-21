@@ -161,6 +161,11 @@ export function validatePotluckForm(form: any) {
   if (votingOpensAt != null && votingClosesAt != null && votingClosesAt <= votingOpensAt) {
     fail("Voting must close after it opens.");
   }
+  const timeTbd = Boolean(form.timeTbd);
+  // With the hour still undecided, startsAt is a placeholder, so only a known start time is compared.
+  if (!timeTbd && votingOpensAt != null && votingOpensAt < startsAt) {
+    fail("Voting can’t open before the potluck starts.");
+  }
 
   return {
     title: str(form.title, "Title", 1, 80),
@@ -170,6 +175,8 @@ export function validatePotluckForm(form: any) {
     description: optStr(form.description, "Description", 1000),
     location: optStr(form.location, "Location", 160),
     startsAt,
+    timeTbd,
+    allergyNote: optStr(form.allergyNote, "Allergy note", 300),
     votingOpensAt,
     votingClosesAt,
     maxGuests,
@@ -208,6 +215,7 @@ export function validateDishForm(form: any, potluck: Doc<"potlucks">) {
     dietary: stringList(form.dietary, "Dietary tags", 20, 60),
     prepMinutes: wholeNumber(form.prepMinutes, "Prep time"),
     calories: wholeNumber(form.calories, "Calories"),
+    protein: wholeNumber(form.protein, "Protein"),
     photo: (form.photo ?? null) as string | null,
     recipePhoto: (form.recipePhoto ?? null) as string | null,
     usedRequired: Boolean(form.usedRequired),

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '../../../../hooks/AuthContext';
 import { useDishes, usePotluck } from '../../../../hooks/useFirestore';
@@ -62,7 +62,7 @@ export default function Results() {
 
   return (
     <Screen>
-      <PageHeader title="Potluck Competition" backTo={`/potlucks/${pid}`} actions={<Button variant="link" title="Share" onPress={share} />} />
+      <PageHeader title="Potluck Competition" backTo={`/potlucks/${pid}`} actions={<Button size="sm" icon="share-social-outline" title="Share" onPress={share} />} />
 
       <View style={{ alignItems: 'center', marginBottom: 16 }}>
         <Text style={{ fontSize: 48 }}>🎉</Text>
@@ -105,12 +105,12 @@ export default function Results() {
               style={[s.podium, { backgroundColor: PLACES[i].bg }, PLACES[i].border ? { borderWidth: 2, borderColor: PLACES[i].border } : {}]}>
               <View style={s.rank}><Text style={[type.h3, { color: PLACES[i].rank }]}>{i + 1}</Text></View>
               <View style={s.thumb}><FsImage src={d.photo} /></View>
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={[type.body, type.heavy]} numberOfLines={1}>{d.name}</Text>
-                <Row gap={4}>
-                  <Avatar uid={d.authorId} profile={lookup(d.authorId)} size={22} medal={false} />
-                  <Text style={[type.small, { flexShrink: 1 }]} numberOfLines={1}>by {name(d.authorId)}</Text>
+              <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+                <Row gap={6}>
+                  <Avatar uid={d.authorId} profile={lookup(d.authorId)} size={i === 0 ? 30 : 24} medal={false} />
+                  <Text style={[i === 0 ? type.h2 : type.h3, { flexShrink: 1 }]} numberOfLines={1}>{name(d.authorId)}</Text>
                 </Row>
+                <Text style={[type.body, type.bold]} numberOfLines={2}>{d.name}</Text>
                 {potluck.prizes?.[i] ? <Text style={[type.small, type.bold]} numberOfLines={2}>🎁 {potluck.prizes[i]}</Text> : null}
               </View>
               <Stars small value={d.overall} />
@@ -126,13 +126,17 @@ export default function Results() {
           {showAll && (
             <Card style={{ padding: 6, marginBottom: 16 }}>
               {ranked.slice(3).map((d: any, i: number) => (
-                <Row key={d.id} gap={10} style={{ padding: 8 }}>
+                <Pressable key={d.id} onPress={() => openDish(d.id)} accessibilityRole="button" accessibilityLabel={`${d.name} by ${name(d.authorId)}`}
+                  style={({ pressed }) => [{ flexDirection: 'row', alignItems: 'center', gap: 10, padding: 8 }, pressed && { opacity: 0.6 }]}>
                   <Text style={[type.body, type.bold, type.muted, { width: 24 }]}>{i + 4}</Text>
-                  <Text style={[type.body, { flex: 1 }]} numberOfLines={1} onPress={() => openDish(d.id)}>
-                    {d.name} <Text style={[type.small, type.muted]}>by {name(d.authorId)}</Text>
-                  </Text>
+                  <Avatar uid={d.authorId} profile={lookup(d.authorId)} size={24} medal={false} />
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={[type.body, type.bold]} numberOfLines={1}>{name(d.authorId)}</Text>
+                    <Text style={[type.small, type.muted]} numberOfLines={1}>{d.name}</Text>
+                  </View>
                   <Stars small value={d.overall} />
-                </Row>
+                  <Icon name="chevron-forward" size={16} color={colors.muted} />
+                </Pressable>
               ))}
             </Card>
           )}
@@ -141,19 +145,19 @@ export default function Results() {
 
       {(awards.length > 0 || brackets.length > 0) && (
         <>
-          <Text style={[type.h3, { marginTop: 8, marginBottom: 8 }]}>Category champions</Text>
+          <Text style={[type.h3, { marginTop: 8, marginBottom: 8 }]}>Category winners</Text>
           <View style={s.awards}>
             {awards.map((a: any) => (
               <Card key={a.category.id} style={s.award} onPress={() => openDish(a.dish.id)}>
                 <Text style={[type.caps, { color: colors.coral }]}>Top {a.category.name}</Text>
-                <Text style={[type.body, type.bold]} numberOfLines={1}>{a.dish.name}</Text>
-                <Text style={[type.small, type.muted]} numberOfLines={1}>{name(a.dish.authorId)} · {a.category.mode === 'ai' ? `${healthPoints(a.dish, a.category.id) ?? Math.round(a.avg * 20)}/100 · AI` : `${a.avg.toFixed(1)}/5`}</Text>
+                <Text style={[type.body, type.bold]} numberOfLines={2}>{a.dish.name}</Text>
+                <Text style={[type.small, type.muted]} numberOfLines={1}>{name(a.dish.authorId)} · {a.category.mode === 'ai' ? `${healthPoints(a.dish, a.category.id) ?? Math.round(a.avg * 20)}/100 (AI)` : `${a.avg.toFixed(1)}/5`}</Text>
               </Card>
             ))}
             {brackets.map((b: any) => (
               <Card key={b.category.id} style={s.award} onPress={() => openDish(b.dish.id)}>
                 <Text style={[type.caps, { color: colors.mint }]}>Best {b.category.name}</Text>
-                <Text style={[type.body, type.bold]} numberOfLines={1}>{b.dish.name}</Text>
+                <Text style={[type.body, type.bold]} numberOfLines={2}>{b.dish.name}</Text>
                 <Text style={[type.small, type.muted]} numberOfLines={1}>{name(b.dish.authorId)} · {b.dish.overall.toFixed(1)}/5</Text>
               </Card>
             ))}
@@ -166,7 +170,7 @@ export default function Results() {
         <Text style={[type.small, type.muted]}>{summary.dishCount} dishes</Text>
         <Text style={[type.small, type.muted]}>{summary.totalVotes} ratings</Text>
       </Card>
-      <Button size="lg" variant="soft" title="Share the results" onPress={share} />
+      <Button size="lg" icon="share-social-outline" title="Share the results" onPress={share} />
     </Screen>
   );
 }

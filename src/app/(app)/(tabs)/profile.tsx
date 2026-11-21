@@ -13,7 +13,7 @@ import { formatDate } from '../../../lib/dates';
 import { androidAppUrl, isNative } from '../../../lib/platform';
 import Avatar from '../../../components/Avatar';
 import {
-  Banner, Button, Card, Chip, Dialog, Icon, IconButton, Input, ListRow, OptionSheet, PageHeader, Row, Screen, Stack, Tile, useConfirm, useFormError, useToast,
+  Banner, Button, Card, Dialog, Icon, IconButton, Input, ListRow, OptionSheet, PageHeader, Row, Screen, Stack, Tile, useConfirm, useFormError, useToast,
 } from '../../../components/ui';
 import { colors, shadow, type } from '../../../theme';
 
@@ -173,12 +173,12 @@ export default function Profile() {
       <PageHeader title="Profile" back={false} />
 
       <Card style={{ padding: 24, alignItems: 'center', marginBottom: 16 }}>
-        <View style={{ marginBottom: 10 }}>
+        <Pressable onPress={() => setPhotoSheet(true)} accessibilityRole="button" accessibilityLabel="Change photo" style={{ marginBottom: 10 }}>
           <Avatar uid={uid} profile={profile} size={112} />
-          <Pressable onPress={() => setPhotoSheet(true)} accessibilityRole="button" accessibilityLabel="Change photo" style={s.camera}>
+          <View style={s.camera}>
             {busy === 'photo' ? <ActivityIndicator size="small" color={colors.white} /> : <Icon name="camera" size={18} color={colors.white} />}
-          </Pressable>
-        </View>
+          </View>
+        </Pressable>
         {name === null ? (
           <Row gap={4}>
             <Text style={type.h2}>{profile?.displayName ?? '…'}</Text>
@@ -192,20 +192,25 @@ export default function Profile() {
           </Row>
         )}
         <Text style={[type.small, type.muted, { marginTop: 2 }]}>{isGuest ? 'Guest' : user?.email}</Text>
-        {profile?.frame && (
-          <View style={{ marginTop: 8 }}>
-            <Chip tone="gold">{`${frameInfo(profile.frame.tier)?.badge ?? ''} ${frameInfo(profile.frame.tier)?.label ?? ''}`}</Chip>
-          </View>
-        )}
+        <Row gap={8} style={{ marginTop: 12, alignSelf: 'stretch' }}>
+          <Button style={{ flex: 1 }} size="sm" variant="soft" icon="camera-outline" title="Change photo" loading={busy === 'photo'}
+            onPress={() => setPhotoSheet(true)} />
+          <Button style={{ flex: 1 }} size="sm" variant="soft" icon="ellipse-outline" title="Change frame"
+            accessibilityLabel={profile?.frame ? `Change frame (wearing ${frameInfo(profile.frame.tier)?.label ?? 'one'})` : 'Change frame'}
+            onPress={() => router.push('/frames' as any)} />
+        </Row>
         <Row gap={8} style={{ marginTop: 16, alignSelf: 'stretch' }}>
-          {[
-            ['Potlucks', potlucks.length],
-            ['Dishes shared', dishesShared],
-            ['Wins', winCount(uid, potlucks)],
-          ].map(([label, value]) => (
-            <Tile key={label} tone="peach" style={{ flex: 1, paddingVertical: 10, alignItems: 'center' }}>
+          {([
+            ['Potlucks', potlucks.length, () => router.push('/events')],
+            ['Dishes', dishesShared, () => router.push({ pathname: '/recipes', params: { show: 'mine' } })],
+            ['Wins', winCount(uid, potlucks), () => router.push('/frames' as any)],
+          ] as const).map(([label, value, open]) => (
+            <Tile key={label} tone="peach" onPress={open} style={s.stat}>
               <Text style={[type.h2, { fontSize: 22 }]}>{value}</Text>
-              <Text style={[type.small, type.muted]}>{label}</Text>
+              <Row gap={2}>
+                <Text style={[type.small, type.muted]} numberOfLines={1}>{label}</Text>
+                <Icon name="chevron-forward" size={12} color={colors.muted} />
+              </Row>
             </Tile>
           ))}
         </Row>
@@ -223,10 +228,7 @@ export default function Profile() {
         <ListRow icon="chatbubble-outline" iconColor={colors.coral} label="Give feedback" sub="Help make Potluck Showdown better" onPress={() => router.push('/feedback' as any)} last />
       </Card>
 
-      <Text style={[type.h3, { marginBottom: 4 }]}>Profile frames</Text>
-      <Text style={[type.small, type.muted, { marginBottom: 10 }]}>
-        Profiles are private, but everyone sees your picture in feeds and guest lists. Collect frames by hosting, cooking, voting, winning and inviting friends.
-      </Text>
+      <Text style={[type.h3, { marginBottom: 8 }]}>Profile frames</Text>
       <FrameSummary frames={frames} onOpen={() => router.push('/frames' as any)} />
 
       {trophies.length > 0 && (
@@ -269,6 +271,7 @@ const s = StyleSheet.create({
     position: 'absolute', top: 0, right: 0, width: 36, height: 36, borderRadius: 18, backgroundColor: colors.coral,
     alignItems: 'center', justifyContent: 'center', ...shadow,
   },
+  stat: { flex: 1, minWidth: 0, minHeight: 64, paddingVertical: 10, paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center' },
   frames: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 24 },
   frame: {
     flexGrow: 1, flexBasis: '30%', minWidth: 100, alignItems: 'center', padding: 14, backgroundColor: colors.white,

@@ -75,3 +75,10 @@ export const ImpactStyle = Haptics.ImpactFeedbackStyle;
 export function tapFeedback(style: Haptics.ImpactFeedbackStyle = ImpactStyle.Light): void {
   if (isNative) Haptics.impactAsync(style).catch(() => {});
 }
+
+/** A maps search for a free-text place ("Campus Center courtyard"), opened in the phone's maps app or browser. */
+export function mapsUrl(place: string): string {
+  const q = encodeURIComponent(place);
+  if (Platform.OS === "ios") return `http://maps.apple.com/?q=${q}`;
+  return `https://www.google.com/maps/search/?api=1&query=${q}`;
+}

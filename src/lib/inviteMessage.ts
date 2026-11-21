@@ -1,4 +1,4 @@
-import { formatWhen } from "./dates";
+import { potluckWhen } from "./dates";
 
 /**
  * The text sent with an invite link. The link itself is added by the share
@@ -7,11 +7,12 @@ import { formatWhen } from "./dates";
 export function inviteMessage(potluck: {
   title: string;
   startsAt?: any;
+  timeTbd?: boolean;
   location?: string;
   theme?: string;
   inviteCode: string;
 }): string {
-  const when = formatWhen(potluck.startsAt);
+  const when = potluckWhen(potluck);
   return [
     `🍲 Come join my potluck, “${potluck.title}”!`,
     potluck.theme ? `🏆 Theme: ${potluck.theme}` : null,

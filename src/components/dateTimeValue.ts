@@ -72,6 +72,21 @@ export function parseTypedTime(text: string, pm: boolean): string | null {
   return `${pad((h % 12) + (pm ? 12 : 0))}:${pad(m)}`;
 }
 
+/**
+ * A time typed the 24-hour way, turned into the 12-hour field: "13:00" → { text: "1:00", pm: true },
+ * "00:30" → { text: "12:30", pm: false }. Null for an ordinary 12-hour time.
+ * While still typing (`done` false) only a full four-digit time converts, so "13" can still become "1:30".
+ */
+export function fromMilitary(text: string, done = false): { text: string; pm: boolean } | null {
+  const d = text.replace(/\D/g, "");
+  if (!d || d.length > 4 || (d.length < 4 && !done)) return null;
+  const [h, m] = d.length <= 2 ? [Number(d), 0] : [Number(d.slice(0, -2)), Number(d.slice(-2))];
+  if (m > 59) return null;
+  if (h >= 13 && h <= 23) return { text: `${h - 12}:${pad(m)}`, pm: true };
+  if (h === 0) return { text: `12:${pad(m)}`, pm: false };
+  return null;
+}
+
 /** "18:30" → { text: "6:30", pm: true }, for showing a stored time in the typed field. */
 export function toTypedTime(value?: string | null): { text: string; pm: boolean } | null {
   const match = /^(\d{1,2}):(\d{2})$/.exec(value ?? "");
