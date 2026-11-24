@@ -45,6 +45,61 @@ one you can vote in right now, one you can add a dish to, one you already won, a
   `public/og-invite.png` (regenerate it with `npm run icons`). Set `EXPO_PUBLIC_WEB_URL` before `npm run build:web`
   so the picture gets a full URL.
 
+## Deploying to Vercel (Production)
+
+Potluck Showdown deploys as a static web app on **Vercel** with a reactive backend on **Convex Cloud**.
+
+### 1. Set up your Convex Backend
+
+1. Fork or clone this repository and install dependencies:
+   ```bash
+   npm install
+   ```
+2. Log in and deploy your Convex backend to production:
+   ```bash
+   npx convex deploy
+   ```
+   Note the production URL printed (e.g. `https://<your-deployment>.convex.cloud`).
+3. *(Optional)* Seed demo potlucks and accounts into production:
+   ```bash
+   npx convex run --prod seedDemo:run
+   ```
+4. Create a production deploy key for Vercel:
+   ```bash
+   npx convex deployment token create vercel-deploy --prod
+   ```
+   *(Or generate one in the Convex Dashboard under Project Settings → Deploy Keys).*
+
+### 2. Deploy the Web App on Vercel
+
+#### Option A: Via GitHub & Vercel Dashboard (Recommended)
+
+1. Push your repository to GitHub.
+2. In [Vercel](https://vercel.com/new), import your GitHub repository.
+3. Vercel automatically detects `vercel.json` (`npx convex deploy && npm run build:web`).
+4. Under **Environment Variables**, add:
+   - **`CONVEX_DEPLOY_KEY`**: Your production deploy key from Step 1.
+   - **`EXPO_PUBLIC_CONVEX_URL`**: Your production Convex URL (e.g. `https://<your-deployment>.convex.cloud`).
+   - **`EXPO_PUBLIC_WEB_URL`**: Your Vercel deployment URL (e.g. `https://your-project.vercel.app`).
+5. Click **Deploy**.
+
+#### Option B: Via Vercel CLI
+
+```bash
+npm i -g vercel
+vercel link
+vercel env add CONVEX_DEPLOY_KEY production
+vercel env add EXPO_PUBLIC_CONVEX_URL production
+vercel env add EXPO_PUBLIC_WEB_URL production
+vercel deploy --prod
+```
+
+### 3. Optional: Backend Secrets
+
+Set these on the Convex deployment (via `npx convex env set` or the Convex Dashboard):
+- Password reset emails: `RESEND_API_KEY` and `RESET_EMAIL_FROM`
+- AI Healthiness scoring: `PRIVATE_MODE_API_KEY` and `USDA_API_KEY`
+
 ## AI healthiness scoring
 
 AI Healthiness uses Privatemode GLM Flash and USDA FoodData Central. It checks Open Food Facts

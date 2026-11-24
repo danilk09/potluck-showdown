@@ -32,3 +32,4 @@ web-build/
 # Per-person IDE state (selected device, device lists, caches) — would cause merge conflicts
 .idea/caches/
 .idea/deviceManager.xml
+.vercel
