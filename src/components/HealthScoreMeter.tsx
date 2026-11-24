@@ -66,7 +66,9 @@ export function HealthScoreMeter({
             style={styles.track}
             accessibilityRole="progressbar"
             accessibilityLabel={title}
-            accessibilityValue={{ min: 0, max: 100, now: score }}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={score}
           >
             <Animated.View style={[styles.fill, {
               width: fill.interpolate({ inputRange: [0, 100], outputRange: ["0%", "100%"] }),
