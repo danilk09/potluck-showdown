@@ -254,6 +254,101 @@ describe("nutrition provider lookup", () => {
     expect(fetchMock.mock.calls.map(([url]) => String(url))).not.toContain("https://api.nal.usda.gov/fdc/v1/foods?api_key=test-usda-key");
   });
 
+  it("scores a recipe whose headings were omitted and whose seasoning was split", async () => {
+    const cobb = {
+      ingredients: [
+        "COBB SALAD",
+        "2 romaine lettuce hearts",
+        "2 cups cooked chicken breast",
+        "6 slices bacon",
+        "3 eggs",
+        "1 large avocado",
+        "1 cup cherry tomatoes",
+        "1/2 cup crumbled blue cheese",
+        "1/4 small red onion (optional)",
+        "DRESSING",
+        "3 tbsp red wine vinegar",
+        "1 tsp Dijon mustard",
+        "1 tsp honey",
+        "1 garlic clove",
+        "1/2 cup olive oil",
+        "Salt and black pepper",
+      ],
+    };
+    const rows = [
+      ["romaine", "romaine lettuce", 2, "piece"],
+      ["chicken", "cooked chicken breast", 2, "cup"],
+      ["bacon", "bacon cooked", 6, "slice"],
+      ["egg", "hard boiled egg", 3, "egg"],
+      ["avocado", "avocado", 1, "piece"],
+      ["tomatoes", "cherry tomatoes raw", 1, "cup"],
+      ["blue cheese", "blue cheese crumbled", 0.5, "cup"],
+      ["onion", "red onion raw", 0.25, "piece"],
+      ["vinegar", "red wine vinegar", 3, "tbsp"],
+      ["mustard", "dijon mustard", 1, "tsp"],
+      ["honey", "honey", 1, "tsp"],
+      ["garlic", "garlic raw", 1, "clove"],
+      ["olive oil", "olive oil", 0.5, "cup"],
+      ["salt", "salt", 0.25, "tsp"],
+      ["pepper", "black pepper", 0.25, "tsp"],
+    ].map(([keyword, query, quantity, unit]) => ({ keyword, query, quantity, unit, grams: 0, branded: false }));
+    const nutrients = [
+      { nutrientId: 2048, unitName: "KCAL", value: 160 },
+      { nutrientId: 1093, unitName: "MG", value: 5 },
+      { nutrientId: 1258, unitName: "G", value: 0.2 },
+      { nutrientId: 1079, unitName: "G", value: 7 },
+      { nutrientId: 1003, unitName: "G", value: 8 },
+    ];
+    const fetchMock = vi.fn<typeof fetch>(async (url) => {
+      const href = String(url);
+      if (href.includes("privatemode")) {
+        const calls = fetchMock.mock.calls.filter(([called]) => String(called).includes("privatemode")).length;
+        return calls === 1
+          ? complete({ ingredients: rows })
+          : complete({ matches: rows.map(() => [0, "none"]) });
+      }
+      return Response.json({ foods: [{ description: "Matched food", foodNutrients: nutrients }] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(calculateHealthScore(cobb, keys)).resolves.toBe(scoreNutrition([beans]));
+    const sent = JSON.parse(JSON.parse(String(fetchMock.mock.calls[0][1]?.body)).messages[1].content);
+    expect(sent.ingredients).toContain("COBB SALAD");
+    expect(sent.ingredients).not.toContain("DRESSING");
+    expect(sent.ingredients).toContain("Salt and black pepper");
+  });
+
+  it("scores foods it can read when the list has no amounts and the model skips a line", async () => {
+    const rows = [
+      { keyword: "chicken", query: "chicken breast cooked", quantity: 1, unit: "breast", grams: 0, branded: false },
+      { keyword: "bacon", query: "bacon cooked", quantity: 2, unit: "strips", grams: 0, branded: false },
+    ];
+    const nutrients = [
+      { nutrientId: 2048, unitName: "KCAL", value: 160 },
+      { nutrientId: 1093, unitName: "MG", value: 5 },
+      { nutrientId: 1258, unitName: "G", value: 0.2 },
+      { nutrientId: 1079, unitName: "G", value: 7 },
+      { nutrientId: 1003, unitName: "G", value: 8 },
+    ];
+    const fetchMock = vi.fn<typeof fetch>(async (url) => {
+      const href = String(url);
+      if (href.includes("privatemode")) {
+        const calls = fetchMock.mock.calls.filter(([called]) => String(called).includes("privatemode")).length;
+        return calls === 1
+          ? complete({ ingredients: rows })
+          : complete({ matches: rows.map(() => [0, "none"]) });
+      }
+      return Response.json({ foods: [{ description: "Matched food", foodNutrients: nutrients }] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(calculateHealthScore({
+      ingredients: ["CHICKEN BREAST", "bacon", "something odd", "Dressing"],
+    }, keys)).resolves.toBe(scoreNutrition([beans]));
+    const sent = JSON.parse(JSON.parse(String(fetchMock.mock.calls[0][1]?.body)).messages[1].content);
+    expect(sent.ingredients).toEqual(["CHICKEN BREAST", "bacon", "something odd"]);
+  });
+
   it("looks up rejected USDA matches in Open Food Facts", async () => {
     const fetchMock = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(normalized())
